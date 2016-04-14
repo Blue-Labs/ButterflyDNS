@@ -48,29 +48,51 @@ def _cfg_List(config, section, key):
 
 
 class LDAP():
-   def __init__(self):
-      valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
-      host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
-      port        = int(cfg.get('ldap', 'port', fallback='389'))
-      userdn      = cfg.get('ldap', 'userdn')
-      passwd      = cfg.get('ldap', 'userpassword')
+    def __init__(self, cfg):
+        self.cfg         = cfg
+        self.valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
+        self.host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
+        self.port        = int(cfg.get('ldap', 'port', fallback='389'))
+        self.userdn      = cfg.get('ldap', 'userdn')
+        self.passwd      = cfg.get('ldap', 'userpassword')
+        self.retry_connect()
 
-      try:
-         ca_file = '/etc/ssl/certs/ca-certificates.crt'
-         tlso    = Tls(ca_certs_file=ca_file, validate=ssl.CERT_REQUIRED,
-                       valid_names=valid_names)
-         server  = Server(host, port=port, use_ssl=False, tls=tlso)
-         ctx     = Connection(server, userdn, passwd, raise_exceptions=True,
-                       authentication=AUTH_SIMPLE)
+    def retry_connect(self):
+        deadtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=60)
+        self.ctx = None
 
-         ctx.open()
-         ctx.start_tls()
-         if not ctx.bind():
-            print('oh shit, authenticator failed to bind')
-            raise Exception('Failed to bind')
-      except Exception as e:
-         raise
-      self.ctx = ctx
+        while deadtime > datetime.datetime.utcnow():
+            try:
+                ca_file = '/etc/ssl/certs/ca-certificates.crt'
+                tlso    = Tls(ca_certs_file=ca_file, validate=ssl.CERT_REQUIRED,
+                              valid_names=self.valid_names)
+                server  = Server(self.host, port=self.port, use_ssl=False, tls=tlso)
+                ctx     = Connection(server, user=self.userdn, password=self.passwd,
+                                  raise_exceptions=True, authentication=AUTH_SIMPLE)
+                ctx.open()
+                ctx.start_tls()
+                if not ctx.bind():
+                    print('oh shit, authenticator failed to bind')
+                    raise Exception('Failed to bind')
+                break
+
+            except LDAPSessionTerminatedByServer:
+                time.sleep(1)
+
+            except Exception as e:
+                raise
+
+        self.ctx = ctx
+
+
+    def rsearch(self, base, filter, attributes=ALL_ATTRIBUTES):
+        # allow secondary exceptions to raise
+        try:
+            self.ctx.search(base, filter, attributes=attributes)
+            print('search finished')
+        except LDAPSessionTerminatedByServer:
+            self.retry_connect()
+            self.ctx.search(base, filter, attributes=attributes)
 
 
 
@@ -90,13 +112,11 @@ class AuthenticatorSession(ApplicationSession):
 
       for key in ('valid_names','host','userdn','userpassword'):
          if not cfg.get('ldap', key):
-            s = "LDAP; required config option '{}' not found".format(key)
+            s = "section [ldap]; required config option '{}' not found".format(key)
             raise KeyError(s)
       
       self.cfg = cfg
-
-      _ldap = LDAP(cfg)
-      self.ctx = _ldap.ctx
+      self._ldap = LDAP(cfg)
 
       def checkPassword(challenge_password, password):
          challenge_bytes = dcode(challenge_password[6:])
@@ -114,23 +134,16 @@ class AuthenticatorSession(ApplicationSession):
          attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
                      'cbtid','cbtidExpires','department','displayName','jpegPhoto']
          
-         try:
-            self.ctx.search('ou=ButterflyDNS,dc=head,dc=org',
-               '(roleUsername={authid})'.format(authid=authid),
-               attributes=attributes)
-         except LDAPSessionTerminatedByServer:
-            _ldap = LDAP(self.cfg)
-            self.ctx = _ldap.ctx
-            self.ctx.search('ou=ButterflyDNS,dc=head,dc=org',
+         self._ldap.rsearch('ou=ButterflyDNS,dc=head,dc=org',
                '(roleUsername={authid})'.format(authid=authid),
                attributes=attributes)
 
-         if not len(self.ctx.response) == 1:
+         if not len(self._ldap.ctx.response) == 1:
             raise ApplicationError(u'org.head.butterflydns.invalid_credentials',
               "could not authenticate session - invalid credentials '{}' for principal {}"\
               .format(ticket, authid))
 
-         principal = self.ctx.response[0]['attributes']
+         principal = self._ldap.ctx.response[0]['attributes']
          if not 'roleAdmin' in principal:
             principal['roleAdmin'] = [False]
          if not 'jpegPhoto' in principal:
