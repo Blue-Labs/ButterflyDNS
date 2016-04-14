@@ -1,0 +1,189 @@
+{
+    "version": 2,
+    "controller": {},
+    "workers": [
+        {
+            "type": "router",
+            "options": {
+                "pythonpath": [
+                    ".."
+                ],
+                "env": {
+                    "vars": {
+                        "PYTHONUNBUFFERED": "1"
+                    }
+                }
+            },
+            "realms": [
+                {
+                    "name": "authentication",
+                    "roles": [
+                        {
+                            "name": "authenticator",
+                            "permissions": [
+                                {
+                                    "uri": "org.head.butterflydns.authenticate",
+                                    "match": "exact",
+                                    "allow": {
+                                        "call": false,
+                                        "register": true,
+                                        "publish": false,
+                                        "subscribe": false
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": false
+                                    },
+                                    "cache": true
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "name": "butterflydns",
+                    "roles": [
+                        {
+                            "name": "ButterflyDNS Provider",
+                            "allow-by-default": true,
+                            "permissions": [
+                                {
+                                    "uri": "wamp.subscription.*",
+                                    "allow": {
+                                        "call": true,
+                                        "subscribe": true
+                                    }
+                                },
+                                {
+                                    "uri": "org.head.butterflydns.role.*",
+                                    "allow": {
+                                        "register": true,
+                                        "publish": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                },
+                                {
+                                    "uri": "org.head.butterflydns.zone.*",
+                                    "allow": {
+                                        "register": true,
+                                        "publish": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                },
+                                {
+                                    "uri": "org.head.butterflydns.zones.*",
+                                    "allow": {
+                                        "register": true,
+                                        "publish": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "ButterflyDNS Client",
+                            "allow-by-default": true,
+                            "permissions": [
+                                {
+                                    "uri": "org.head.butterflydns.role.*",
+                                    "allow": {
+                                        "call": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                },
+                                {
+                                    "uri": "org.head.butterflydns.zone.*",
+                                    "allow": {
+                                        "subscribe": true,
+                                        "call": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                },
+                                {
+                                    "uri": "org.head.butterflydns.zones.*",
+                                    "allow": {
+                                        "subscribe": true,
+                                        "call": true
+                                    },
+                                    "disclose": {
+                                        "caller": true,
+                                        "publisher": true
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "transports": [
+                {
+                    "type": "web",
+                    "endpoint": {
+                        "type": "tcp",
+                        "port": 8080,
+                        "tls": {
+                            "key": "/etc/letsencrypt/live/head.org/privkey.pem",
+                            "certificate": "/etc/letsencrypt/live/head.org/cert.pem",
+                            "chain_certificates": [
+                                "/etc/letsencrypt/live/head.org/chain.pem"
+                            ],
+                            "dhparam": "/etc/nginx/sites/head.org/dhparam.pem",
+                            "ciphers": "ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AES:RSA+3DES:!ADH:!AECDH:!MD5:!DSS"
+                        }
+                    },
+                    "paths": {
+                        "/": {
+                            "type": "static",
+                            "directory": "../htdocs/"
+                        },
+                        "ws": {
+                            "type": "websocket",
+                            "cookie": {
+                                "store": {
+                                    "type": "file",
+                                    "filename": "cookies.dat"
+                                }
+                            },
+                            "url": "wss://this.must.be.here.but.means.nothing:8080/ws",
+                            "auth": {
+                                "ticket": {
+                                    "type": "dynamic",
+                                    "authenticator": "org.head.butterflydns.authenticate",
+                                    "authenticator-realm": "authentication"
+                                },
+                                "cookie": {}
+                            },
+                            "options": {
+                                "auto_ping_interval": 10000,
+                                "echo_close_codereason": true
+                            }
+                        }
+                    }
+                }
+            ],
+            "components": [
+                {
+                    "type": "class",
+                    "classname": "authenticator.AuthenticatorSession",
+                    "realm": "authentication",
+                    "role": "authenticator"
+                }
+            ]
+        }
+    ]
+}
