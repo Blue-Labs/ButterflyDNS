@@ -5,10 +5,10 @@ will instantiate the below AuthenticatorSession() class, you do not need to run 
 yourself.
 """
 
-__version__  = '1.0'
+__version__  = '1.1'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2016-Apr-14 00:31Z'
+__date__     = '2016-Apr-14 23:31Z'
 __license__  = 'Apache 2.0'
 
 
@@ -53,6 +53,7 @@ class LDAP():
         self.valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
         self.host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
         self.port        = int(cfg.get('ldap', 'port', fallback='389'))
+        self.base        = cfg.get('ldap', 'base')
         self.userdn      = cfg.get('ldap', 'userdn')
         self.passwd      = cfg.get('ldap', 'userpassword')
         self.retry_connect()
@@ -85,8 +86,10 @@ class LDAP():
         self.ctx = ctx
 
 
-    def rsearch(self, base, filter, attributes=ALL_ATTRIBUTES):
+    def rsearch(self, base=None, filter=None, attributes=ALL_ATTRIBUTES):
         # allow secondary exceptions to raise
+        if not base:
+            base = self.base
         try:
             self.ctx.search(base, filter, attributes=attributes)
             print('search finished')
@@ -110,11 +113,11 @@ class AuthenticatorSession(ApplicationSession):
       cfg['ldap']['host'] = host
       cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
 
-      for key in ('valid_names','host','userdn','userpassword'):
+      for key in ('valid_names','host','userdn','userpassword','base'):
          if not cfg.get('ldap', key):
             s = "section [ldap]; required config option '{}' not found".format(key)
             raise KeyError(s)
-      
+
       self.cfg = cfg
       self._ldap = LDAP(cfg)
 
@@ -133,9 +136,9 @@ class AuthenticatorSession(ApplicationSession):
 
          attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
                      'cbtid','cbtidExpires','department','displayName','jpegPhoto']
-         
-         self._ldap.rsearch('ou=ButterflyDNS,dc=head,dc=org',
-               '(roleUsername={authid})'.format(authid=authid),
+
+         base=self.cfg.get('ldap','base')
+         self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
                attributes=attributes)
 
          if not len(self._ldap.ctx.response) == 1:
@@ -155,7 +158,7 @@ class AuthenticatorSession(ApplicationSession):
 
          if principal['jpegPhoto'][0]:
             principal['jpegPhoto'] = [base64.b64encode(principal['jpegPhoto'][0])]
-            
+
          if not 'notBefore' in principal and 'notAfter' in principal:
             raise ApplicationError(u'org.head.butterflydns.invalid_role_configured',
               "couldn't authenticate session - invalid role configuration '{}' for principal {}"\
@@ -191,7 +194,7 @@ class AuthenticatorSession(ApplicationSession):
                'displayName': principal['displayName'][0]
             }
          }
-         
+
          print("WAMP-Ticket authentication success: {}".format(resp))
          return res
 

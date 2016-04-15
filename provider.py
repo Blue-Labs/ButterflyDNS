@@ -1,30 +1,14 @@
-###############################################################################
-#
-# Copyright (C) 2014, Tavendo GmbH and/or collaborators. All rights reserved.
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice,
-# this list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
-# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
-# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-# POSSIBILITY OF SUCH DAMAGE.
-#
-###############################################################################
+
+"""
+This is the standalone provider for crossbar that provides all the RPCs and pub/sub for
+operation of ButterflyDNS
+"""
+
+__version__  = '1.1'
+__author__   = 'David Ford <david@blue-labs.org>'
+__email__    = 'david@blue-labs.org'
+__date__     = '2016-Apr-14 23:36Z'
+__license__  = 'Apache 2.0'
 
 from os import environ
 import aiopg
@@ -139,7 +123,7 @@ def _recurse_for_type(zone, _types, nsgroup=gtld_ns):
 def _get_answers(zone, _type, nsgroup):
         if not zone[-1] == '.':
             zone += '.'
-        
+
         yield from asyncio.sleep(0.1)
         q = dns.message.make_query(zone, _type)
 
@@ -167,7 +151,7 @@ def _get_answers(zone, _type, nsgroup):
 
             if response.rcode() == NOERROR:
                 break
-            
+
 
             if not response.rcode() == NXDOMAIN:
                 print('unexpected rcode: {}'.format(response.rcode()))
@@ -184,7 +168,7 @@ def Bget_zone_ns_glue(zone):
         # get NS for TLD
         tld     = zone.split('.')[-1]
         nsgroup = gtld_ns
-        
+
         while True:
             response = yield from _get_answers(tld, NS, nsgroup)
             if len(response.additional):
@@ -214,7 +198,7 @@ def Bget_zone_ns_glue(zone):
         is_done = False
         while not is_done:
             response = yield from _get_answers(zone, NS, nsgroup)
-            
+
             # set nsgroup to null to force an error
             nsgroup = []
 
@@ -228,7 +212,7 @@ def Bget_zone_ns_glue(zone):
                     if rrset.name.to_text().strip('.') == zone:
                         is_done = True
                         break
-                
+
                 # section didn't have our zone as the target, does it have nameservers?
                 nsgroup  = [x[2] for x in get_name_rdtype_from_rrsets(section, [NS])]
 
@@ -273,10 +257,10 @@ def Bget_zone_ns_glue(zone):
                 final[k] += _
 
         rv = []
-        
+
         for k in sorted(final):
           rv.append( {k:sorted(final[k])} )
-          
+
         print('finished',rv)
         return rv
 
@@ -287,6 +271,7 @@ class LDAP():
         self.valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
         self.host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
         self.port        = int(cfg.get('ldap', 'port', fallback='389'))
+        self.base        = cfg.get('ldap', 'base')
         self.userdn      = cfg.get('ldap', 'userdn')
         self.passwd      = cfg.get('ldap', 'userpassword')
         self.retry_connect()
@@ -295,7 +280,7 @@ class LDAP():
     def retry_connect(self):
         deadtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=60)
         self.ctx = None
-        
+
         while deadtime > datetime.datetime.utcnow():
             try:
                 ca_file = '/etc/ssl/certs/ca-certificates.crt'
@@ -320,8 +305,10 @@ class LDAP():
         self.ctx = ctx
 
 
-    def rsearch(self, base, filter, attributes=ALL_ATTRIBUTES):
+    def rsearch(self, base=None, filter=None, attributes=ALL_ATTRIBUTES):
         # allow secondary exceptions to raise
+        if not base:
+            base = self.base
         try:
             self.ctx.search(base, filter, attributes=attributes)
             print('search finished')
@@ -332,10 +319,11 @@ class LDAP():
 
 class ButterflyDNS(ApplicationSession):
 
-    log  = logging.getLogger()
-    pool = None
-    topic_subscribers = {}
+    log   = logging.getLogger()
+    pool  = None
+    _ldap = None
     cache = {}
+    topic_subscribers = {}
 
     @asyncio.coroutine
     def meta_on_join(self, details, b):
@@ -367,7 +355,7 @@ class ButterflyDNS(ApplicationSession):
             self.topic_subscribers[topic['uri']] = []
         if not subscriberid in self.topic_subscribers[topic['uri']]:
             self.topic_subscribers[topic['uri']].append(subscriberid)
-        
+
         #print('sub is: {}'.format(sub))
         #print('sub details and details object: {} {}'.format(sub_details, details))
         #print('details: {}'.format(details))
@@ -404,7 +392,7 @@ class ButterflyDNS(ApplicationSession):
 
         columns = [d.name for d in curs.description]
         rt = []
-        
+
         try:
             for r in rows:
                 _ = dict(zip(columns, r))
@@ -417,7 +405,7 @@ class ButterflyDNS(ApplicationSession):
                         try:
                             ts = _[key].astimezone(tz=datetime.timezone.utc)
                         except Exception as e:
-                            print('Missing create/update data on row') 
+                            print('Missing create/update data on row')
                             print(curs.query.decode())
                             print(_)
                             print('---')
@@ -427,7 +415,7 @@ class ButterflyDNS(ApplicationSession):
                         _[key] = ts
 
                 # make priority an integer
-                for key in ('priority','ttl'): 
+                for key in ('priority','ttl'):
                     try:    _[key] = int(_[key],10)
                     except: pass
 
@@ -448,12 +436,12 @@ class ButterflyDNS(ApplicationSession):
                     retry      = int(retry,10)
                     expire     = int(expire,10)
                     minimumttl = int(minimumttl,10)
-                    
+
 
                     _t = {'primary_ns':primary_ns, 'contact':contact,
                           'serial':serial,
                           'refresh':refresh, 'retry':retry, 'expire':expire, 'minimumttl':minimumttl}
-                    
+
                     if 'soa' in _:
                         _['soa']  = _t
                     else:
@@ -493,10 +481,12 @@ class ButterflyDNS(ApplicationSession):
             database = self.config.extra['cfg'].get('postgresql', 'database')
             user     = self.config.extra['cfg'].get('postgresql', 'user')
             password = self.config.extra['cfg'].get('postgresql', 'password')
-            
+
             self.pool = yield from aiopg.create_pool(host=host, port=port,
                                     database=database, user=user, password=password)
-        
+        if not self._ldap:
+            self._ldap = LDAP(self.config.extra['cfg'])
+
         sublist = yield from self.call('wamp.subscription.list')
         print('onjoin sublist:',sublist)
 
@@ -505,7 +495,7 @@ class ButterflyDNS(ApplicationSession):
         yield from self.subscribe(self.meta_on_subscribe, 'wamp.subscription.on_subscribe', options=SubscribeOptions(details_arg="details"))
         yield from self.subscribe(self.meta_on_unsubscribe, 'wamp.subscription.on_unsubscribe', options=SubscribeOptions(details_arg="details"))
         #yield from self.subscribe(self.send_records, 'org.head.butterflydns.zone.send_records', options=SubscribeOptions(details_arg="details", match='prefix'))
-        
+
         while True:
             #print('.')
             yield from asyncio.sleep(1)
@@ -521,13 +511,13 @@ class ButterflyDNS(ApplicationSession):
     def onLeave(self, details):
         print("ClientSession left:               {}".format(details))
         self.disconnect()
-    
-    
+
+
     def onDisconnect(self):
         print('clientSession disconnected')
         asyncio.get_event_loop().stop()
-        
-    
+
+
     def onSubscribe(self, details):
         print('==========',details)
 
@@ -576,13 +566,12 @@ class ButterflyDNS(ApplicationSession):
         authid=args[0]
 
         try:
-            self._ldap.rsearch('ou=ButterflyDNS,dc=head,dc=org',
-               '(roleUsername={authid})'.format(authid=authid),
+            self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
                attributes=attributes)
         except Exception as e:
             print('exc: {}'.format(e))
 
-        
+
         try:
             principal = self._ldap.ctx.response[0]['attributes']
             if not 'roleAdmin' in principal:
@@ -616,7 +605,7 @@ class ButterflyDNS(ApplicationSession):
     def _zones_summary(self, **args):
         detail = args['detail']
         print('zones.summary(caller={})'.format(detail.caller))
-        
+
         #@asyncio.coroutine
         def __yield(uri, data):
             yield from self.publish(uri, data)
@@ -640,13 +629,13 @@ class ButterflyDNS(ApplicationSession):
               _ = yield from cur.fetchall()
               _ = yield from self._make_dict_list(cur, _)
               print('publishing {} zones'.format(len(_)))
-              
+
               try:
                 print('topic subscribers: {}'.format(self.topic_subscribers['org.head.butterflydns.zones.summary']))
                 exc = [s for s in self.topic_subscribers['org.head.butterflydns.zones.summary'] if not s == detail.caller]
               except:       # sometimes this trigger comes in BEFORE the client subscription event fires which means
                 exc = None  # for the first subscriber, we don't know anything about this topic yet
-              
+
               self.push_pub('org.head.butterflydns.zones.summary', _, options={'exclude':exc, 'eligible':[detail.caller]})
 
         yield from f__g(self.pool)
@@ -682,7 +671,7 @@ class ButterflyDNS(ApplicationSession):
                                    ''', {'zone':zone})
 
             soa = (yield from cur.fetchone())[0]
-              
+
             # soa timestamp is 3rd element
             soa = soa.split(' ')
             soa = soa[:2]+[ts.strftime('%s')]+soa[3:]
@@ -756,7 +745,7 @@ class ButterflyDNS(ApplicationSession):
 
             for x in _:
                 if x[6] in ('SOA','NS','MX'):
-                    if x[6] == 'SOA': continue  
+                    if x[6] == 'SOA': continue
                     if x[6] == 'NS' and x[7] == '@': continue
                     if x[6] == 'MX' and x[7] == '@': continue
                 r.append(x)
@@ -855,12 +844,12 @@ class ButterflyDNS(ApplicationSession):
             print('send_records received args: {}'.format(args))
         for k,v in detail.items():
             print('send_records: k={} v={}'.format(k,v))
-        
+
         zone = args[0]
-        
+
         if not zone:
             return
-        
+
         def process_runner(zone):
             # run all of these concurrently
             tasks = [
@@ -871,12 +860,12 @@ class ButterflyDNS(ApplicationSession):
                 self._get_zone_resourcerecords(zone),
                 self._get_zone_ns_glue(zone),
                 ]
-            
+
             for f in asyncio.as_completed(tasks):
                 topic, result = yield from f
-                
+
                 self.push_pub(topic, result)
-        
+
         yield from process_runner(zone)
 
         """
@@ -905,9 +894,9 @@ class ButterflyDNS(ApplicationSession):
                      'updated':   '',
                      'expires':   '',
               }
-            
+
             self.push_pub('org.head.butterflydns.zone.records.get.registrar.'+zone, _)
-        
+
         @asyncio.coroutine
         def _get_zone_ns_glue(pool, zone):
             _ = yield from Bget_zone_ns_glue(zone)
@@ -980,10 +969,10 @@ class ButterflyDNS(ApplicationSession):
                 self.push_pub('org.head.butterflydns.zone.records.get.single_rr.'+data['zone'], data)
 
             return {'success':True, 'rid':rid}
-        
+
         return (yield from _zone_record_add(self.pool, data))
 
-    
+
     @wamp.register('org.head.butterflydns.zone.record.update')
     def zone_record_update(self, *data, **detail):
         self.log.info('zone_record_update({!r}) {}'.format(data, detail))
@@ -1016,7 +1005,7 @@ class ButterflyDNS(ApplicationSession):
 
                 (topic,_data) = yield from self._update_zone_soa(data['zone'], now)
                 self.push_pub(topic,_data)
-                
+
                 self.push_pub('org.head.butterflydns.zone.records.get.single_rr.'+data['zone'], data)
 
             return {'success':True}
@@ -1025,7 +1014,7 @@ class ButterflyDNS(ApplicationSession):
         #z = loop.run_until_complete(_zone_record_update(self.pool, data))
         #return z
         return (yield from _zone_record_update(self.pool, data))
-        
+
 
     @wamp.register('org.head.butterflydns.zone.record.delete')
     def zone_record_delete(self, *data, **detail):
@@ -1039,7 +1028,7 @@ class ButterflyDNS(ApplicationSession):
                 now  = datetime.datetime.utcnow();
                 data = data[0]
                 print('data is:',data)
-              
+
                 # now delete the record
                 yield from cur.execute('''DELETE
                                           FROM  record r
@@ -1050,7 +1039,7 @@ class ButterflyDNS(ApplicationSession):
                 self.push_pub('org.head.butterflydns.zone.records.get.single_rr.'+data['zone'], {'zone':data['zone'], 'rid':data['rid']})
 
             return {'success':True, 'rid':data['rid']}
-        
+
         return (yield from _zone_record_delete(self.pool, data))
 
 
@@ -1176,7 +1165,7 @@ class ButterflyDNS(ApplicationSession):
                 data['zid'] = zid
                 data['rid'] = -1
                 data['now'] = now
-                
+
                 changed     = data['changed']
                 success     = True
                 errors      = []
@@ -1185,11 +1174,11 @@ class ButterflyDNS(ApplicationSession):
                 new_soa = {k:data[k][0] for k in data if k in ('Primary NS','Contact','Serial','Refresh','Retry','Expire','Minimum TTL')}
                 for k in new_soa:
                     del data[k]
-              
+
                 # now, if no soa key are in the changed keys, we'll ignore all SOA records
                 if not [k for k in new_soa if k in changed]:
                     new_soa = {}
-                
+
                 # fun with all sorts of shit, yay.
                 for K in data:
                     if not K in changed:
@@ -1199,9 +1188,9 @@ class ButterflyDNS(ApplicationSession):
                         if not len(data[K]) == 1:
                             raise ValueError('must be exactly one entry long')
                         data[K] = data[K][0]
-                      
+
                         print('updating {}:{} to {!r}'.format(zone,K,data[K]))
-                      
+
                         k = K.lower()
                         if k == 'manager': k='admin'
 
@@ -1212,10 +1201,10 @@ class ButterflyDNS(ApplicationSession):
                             success = False
                             errors.append( 'Update did not modify exactly 1 row; {} rows modified for key {!r}'.format(len(rows),K) )
                         data['rid'] = rows[0][0]
-                        
+
                         q = 'UPDATE canonical SET updated = %(now)s WHERE rid = %(rid)s'
                         yield from cur.execute(q, data)
-                        
+
                         yield from self._get_zone_local(zone)
 
                     if K in ('Default TTL'):
@@ -1227,7 +1216,7 @@ class ButterflyDNS(ApplicationSession):
                             success = False
                             errors.append('Unable to parse value for Default TTL, must be an integer in {0..2147483647}')
                             continue
-                        
+
                         data[K] = data[K][0]
                         print('updating {}:{} to {!r}'.format(zone,K,data[K]))
                         q = "UPDATE record SET ttl = %(Default TTL)s WHERE zone = %(zid)s AND type = 'SOA' RETURNING rid"
@@ -1242,17 +1231,17 @@ class ButterflyDNS(ApplicationSession):
 
                 # now do the SOA record if requested
                 while new_soa: # use 'while' so we can break out early
-                    
+
                     # fetch the current SOA record
                     yield from cur.execute("SELECT rid,data FROM record WHERE zone = %(zid)s AND type = 'SOA'", data)
                     old_soa = (yield from cur.fetchone())
-                    
+
                     # first, check the new serial # is >= the old serial number. we allow changing the SOA serial manually
                     # this too will break when we support BIND time formats: s/m/h/d/w
                     old_soa_sn = int(old_soa[1].split(' ')[2], 10)
                     # really dumb breakable test
                     new_soa_sn = int(new_soa['Serial'], 10)
-                    
+
                     if not (new_soa_sn >= old_soa_sn):
                         success = False
                         errors.append('New serial number is less than existing ({}); serial number must increment'.format(old_soa_sn))
@@ -1261,7 +1250,7 @@ class ButterflyDNS(ApplicationSession):
                         success = False
                         errors.append('New serial number delta is > 2147483647; ({})'.format(new_soa_sn - old_soa_sn))
                         break
-                    
+
                     # some validation
                     for k in ('Serial','Refresh','Retry','Expire','Minimum TTL'):
                         try:
@@ -1293,13 +1282,13 @@ class ButterflyDNS(ApplicationSession):
                             success = False
                             errors.append('Invalid characters for {}'.format(k))
                             break
-                  
+
                     soa_s = ''
                     for k in ('Primary NS','Contact','Serial','Refresh','Retry','Expire','Minimum TTL'):
                         soa_s += new_soa[k]+' '
 
                     soa_s = soa_s.rstrip(' ')
-                    
+
                     print('oldsoa:',old_soa)
                     print('newsoa:',soa_s)
 
@@ -1314,7 +1303,7 @@ class ButterflyDNS(ApplicationSession):
                         print(e)
 
                 return {'success':success, 'errors':errors}
-    
+
         return (yield from _zone_meta_update(self.pool, data))
 
 
@@ -1394,7 +1383,7 @@ if __name__ == '__main__':
     cfg['ldap']['host'] = host
     cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
 
-    for key in ('valid_names','host','userdn','userpassword'):
+    for key in ('valid_names','host','userdn','userpassword','base'):
         if not cfg.get('ldap', key):
             s = "section [ldap]; required config option '{}' not found".format(key)
             raise KeyError(s)
