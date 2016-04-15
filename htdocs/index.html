@@ -1,0 +1,366 @@
+<!doctype>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+
+    <title>ButterflyDNS</title>
+    <meta name="author" content="David Ford" />
+    <meta name="viewport" content="width=device-width" />
+
+    <link rel="shortcut icon" href="/favicon.ico" sizes="16x16 32x32 48x48 64x64 128x128" type="image/x-icon">
+    <link rel="stylesheet" type="text/css" href="//fonts.googleapis.com/css?family=Belleza&subset=latin,latin-ext">
+    <link rel="stylesheet" type="text/css" href="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.css" />
+    <link rel="stylesheet" type="text/css" href="//code.jquery.com/ui/1.11.2/themes/smoothness/jquery-ui.css" />
+    <link rel="stylesheet" type="text/css" href="/css/butterfly.css" />
+
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+
+    <!-- pretend console exists for IE -->
+    <script type="text/javascript">
+        if (!window.console) window.console = {};
+        if (!window.console.log) window.console.log = function () { };
+    </script>
+
+    <script>AUTOBAHN_DEBUGxx = true; /* put this before we load autobahn.js */</script>
+    <script src="//autobahn.s3.amazonaws.com/autobahnjs/latest/autobahn.min.jgz"></script>
+    <!--<script type='text/javascript' src='/js/autobahn.js'></script>-->
+    <script type='text/javascript' src='/js/butterfly.js'></script>
+    <script type="text/javascript">
+      /* for future use
+        function OnLoad(){
+            // disable triggers until the page is loaded
+            $('body').addClass('disable');
+        }
+
+        $(document).ready(function() {
+            OnLoad();
+            verify_logged_in(after_login);
+        });
+      */
+    </script>
+
+  </head>
+
+<body>
+  <!-- microdata for google's organizing
+       see: http://schema.org/
+            https://developers.google.com/structured-data/testing-tool/d
+   -->
+  <div class="google-microdata" itemscope itemtype="http://schema.org/WebApplication">
+    <span itemprop="name">ButterflyDNS"</span>
+    <div itemprop="aggregateRating" itemscope itemtype="http://schema.org/AggregateRating">
+      <span itemprop="ratingValue">5</span> of
+      <span itemprop="ratingCount">1</span>
+    </div>
+    <link itemprop="applicationCategory" href="http://schema.org/WebApplication"/>
+    <link itemprop="downloadUrl" href="https://github.com/Blue-Labs/ButterflyDNS"/>
+    <span itemprop="audience">DNS Adminstrators</span>
+    <span itemprop="author">David Ford &lt;david@blue-labs.org&gt;</span>
+    <span itemprop="copyrightHolder">David Ford &lt;david@blue-labs.org&gt;</span>
+    <span itemprop="copyrightYear">2014</span>
+    <span itemprop="dateCreated">2014</span>
+    <span itemprop="keywords">dns wamp python jquery crossbar autobahn ldap sql postgresql</span>
+    <span itemprop="license">Apache 2.0</span>
+    <span itemprop="provider">BlueLabs Software</span>
+    <link itemprop="exampleOfWork" href="https://head.org/"/>
+
+    <div itemprop="offers" itemscope itemtype="http://schema.org/Offer">
+      Price: <span itemprop="price">$0</span>
+      <meta itemprop="priceCurrency" content="USD" />
+    </div>
+
+    <span itemprop="operatingSystem">The backend software for this runs on Linux (PostgreSQL, OpenLDAP, Python)</span>
+    <span itemprop="softwareVersion">1.7</span>
+    <span itemprop="browserRequirements">requires HTML5 support</span>
+  </div>
+
+  <div class="body-bg"></div>
+  <div class="page-box">
+    <div class="header-box">
+      <span class="title-bar">ButterflyDNS</span> <span class="version">v1.7</span>
+      <span class="user-box">
+        <div class="anonymous-login">
+          <input type="text" id="username" name="username" placeholder="username"/>
+          <input type="password" id="password" name="password" placeholder="password"/>
+          <input type="button" id="login" name="login" value="login"/>
+        </div>
+        <div class="logged-in-profile">
+          <span class="department"></span>
+          <span class="username"></span>
+          <span class="icons">
+            <img src="/images/18px_logout.png" class="logout button" />
+          </span>
+          <span class="userpic"></span>
+          <span class="logout"></span>
+        </div>
+        <div class="please-log-in">
+          <p>Please log in</p>
+        </div>
+      </span>
+      <span class="location-bar">
+        <ul>
+          <li class="permanent">Home</li>
+        </ul>
+      </span>
+      <span class="menu-bar">
+        <ul>
+          <li>Add zone</li>
+          <li>Tools</li>
+          <li>ButterflyDNS <img src="/images/3dotmenu.png"/></li>
+          <li class="flexstretcher"></li>
+          <li><label for="filter">Filter</label><input name="filter" type="text"/></li>
+        </ul>
+      </span>
+    </div>
+
+    <div class="api-not-available">
+      <div id="api-na-container">
+        <div id="api-na-main">
+          <div id="api-na-outer-circle">
+            <div id="api-na-inner-circle">
+              <div id="api-na-center-circle">
+                <div id="api-na-content">
+                  <p>Waiting for API &#x2026;</p>
+    </div></div></div></div></div></div></div>
+
+    <div class="api-messages">
+      <div>
+      </div>
+    </div>
+
+    <div class="zone-page welcome-page">
+      <p>Welcome to ButterflyDNS</p>
+    </div>
+
+    <div class="zone-page butterflydns-settings">
+      <div>
+        <p>Todo list <strike>struck out text</strike> indicates the line item
+        has been implemented.</p>
+        <ul>
+          <li>*ButterflyDNS DB config</li>
+          <li>*zone add/delete</li>
+          <li>Users and auth
+            <ul>
+              <li>*network IP ACL
+              <li>permissions for zone creation, deletion</li>
+              <li>permissions for zone record editing</li>
+              <li>designation as managers for list of zones</li>
+              <li>designation as user manager</li>
+              <li>managers allowed to create users</li>
+            </ul></li>
+          <li>Database
+            <ul>
+              <li>configuration</li>
+              <li>manual backup</li>
+            </ul></li>
+          <li>Template manager for new zones</li>
+          <li>API error message display implementation for all calls that fail</li>
+          <li>[x] to dismiss error box</li>
+          <li>timeout to dismiss error box</li>
+          <li>highlight error area if applicable</li>
+          <li>edit/update conflict resolution flyout for zone edits</li>
+          <li>allow plain text import of zone during zone creation</li>
+          <li>change pencil cursor to magnifying glass on zone summary</li>
+          <li>make zone summary table look more like zone records table</li>
+          <li>implement filter tool on zone summary and zone records</li>
+          <li>make zone summary paged</li>
+          <li>audit log (see reports)</li>
+          <li>undo history</li>
+          <li>*data validation in api</li>
+          <li>*IP detail in api</li>
+          <li>Tools:
+            <ul>
+              <li>whois</li>
+              <li>MTA tests</li>
+              <li>SSL/TLS cert check</li>
+              <li>Reports
+                <ul>
+                  <li>change history tracked by time/user/ip/sessionid</li>
+                  <li>DNS server query stats</li>
+                </ul></li>
+            </ul></li>
+
+        </ul>
+      </div>
+      <div>
+        <p>Authorized users</p>
+      </div>
+    </div>
+
+
+    <div class="zone-page butterfly-tools">
+
+      <div class="zone-pagelet zone-template-editor">
+        <h3>Template editor</h3>
+        <p>Choose template:</p>
+        <select id="zone-template-names">
+          <option name="none" value="--" selected>Select template name</option>
+          <option name="New" value="New">[Create new template]</option>
+          <option name="foo1" value="foo1">foo1</option>
+          <option name="foo2" value="foo2">foo2</option>
+        </select>
+
+        <div class="template-box">
+          <input type="text" name="template-name" placeholder="template name"/>
+          <input type="text" name="template-contact" placeholder="contact email"/>
+          <input type="number" name="template-default-ttl" placeholder="$TTL"/>
+          <table class="zone-records-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" title="select all rows"/>
+                  <span class="button-icon delete-record delete-record-always" title="Delete selected records"></span></th>
+                <th>Host</th>
+                <th>TTL</th>
+                <th>Type</th>
+                <th>Priority</th>
+                <th>Data<span class="button-icon add-record" title="Add new record"></span></th>
+              </tr>
+            </thead>
+            <tbody>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="zone-pagelet zone-add">
+        <h3>Add new zone</h3>
+        <p>Choose template for new zone:</p>
+        <select id="zone-add-templates">
+          <option name="none" value="none">None</option>
+        </select>
+
+        <input type="text" placeholder="new zone name"/>
+        <input type="button" placeholder="add"/>
+        <input type="button" placeholder="cancel"/>
+      </div>
+
+      <div class="zone-pagelet user-management">
+        <h3>User management</h3>
+        <p>Choose a user:</p>
+        <select id="butterflydns-user-manager">
+          <option name="new" value="">New user</option>
+        </select>
+      </div>
+
+      <div class="zone-pagelet db-management">
+        <h3>User management</h3>
+        <p></p>
+      </div>
+
+      <div class="zone-pagelet butterfly-reports">
+        <h3>ButterflyDNS Reports</h3>
+        <p></p>
+      </div>
+
+    </div>
+
+    <div class="zone-page zone-data-summary">
+      <table>
+        <thead>
+          <tr>
+            <th><input type="checkbox" title="select all rows"/><span class="button-icon delete-record delete-record-always"></span></th><th>Zone</th><th>Serial</th><th>Manager</th><th>Created</th><th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="zone-page zone-edit">
+      <div>
+      <div>
+        <div>
+          <p>SOA:</p>
+          <div>
+            <span class="zone-edit-meta-name">Zone</span>        <span class="zone-edit-meta-svalue"></span><span class="changespacer"></span><br/>
+
+            <span class="zone-edit-meta-name" title="TTL used for any resource record that does not explicitly define a TTL">Default TTL</span> <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="Any nameserver that will respond authoritatively for this domain">Primary NS</span>  <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="Point of contact responsible for this zone and to whom errors should be reported">Contact</span>     <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="Integer value between 0 and 4294967295 with a maximum increment of 2147483647. This value must be incremented for every record update.">Serial</span>      <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="[Slave use only] When a slave will read the master's SOA for comparison. If the master cannot be reached, the slave will continue to provide answers for the domain until Expiry is reached (with periodic retries). range:{0..2147483647}">Refresh</span>     <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="[Slave use only] Defines the time between retries if a slave is unable to contact a master server range:{0..2147483647}">Retry</span>       <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="[Slave use only] The expiry value defines when the slave will stop responding to zone requests for this domain if it has been unable to reach the master for a refresh check. range:{0..2147483647}">Expire</span>      <span class="zone-edit-meta-value"></span><br/>
+
+            <span class="zone-edit-meta-name" title="[All] NXDomain caching time. This is the maximum amount of time a resolver may cache a negative answer for this zone. range:{0..10800}">Minimum TTL</span> <span class="zone-edit-meta-value"></span><br/>
+          </div>
+        </div>
+
+        <div>
+          <p>Local:</p>
+          <div>
+            <span class="zone-edit-meta-name">Manager</span>     <span class="zone-edit-meta-value"></span><br/>
+            <span class="zone-edit-meta-name">Owner</span>       <span class="zone-edit-meta-value"></span><br/>
+            <span class="zone-edit-meta-name">Created</span>     <span class="zone-edit-meta-svalue"></span><br/>
+            <span class="zone-edit-meta-name">Updated</span>     <span class="zone-edit-meta-svalue"></span><br/>
+          </div>
+        </div>
+      </div>
+
+      <div>
+
+        <div>
+          <p>Registrar:</p>
+          <div>
+            <span class="zone-edit-meta-name">Registrar</span>  <span class="zone-edit-meta-svalue"></span><br/>
+            <span class="zone-edit-meta-name">Status</span>     <span class="zone-edit-meta-svalue"></span><br/>
+            <span class="zone-edit-meta-name">Created</span>    <span class="zone-edit-meta-svalue"></span><br/>
+            <span class="zone-edit-meta-name">Updated</span>    <span class="zone-edit-meta-svalue"></span><br/>
+            <span class="zone-edit-meta-name">Expires</span>    <span class="zone-edit-meta-svalue"></span><br/>
+          </div>
+        </div>
+
+        <div>
+          <p>NS Glue:</p>
+          <div>
+            <ul>
+            </ul>
+          </div>
+        </div>
+
+        <div class="zone-edit-xfr-acl">
+          <p>Zone transfer ACL:</p>
+          <div>
+            <table class="zone-records-table">
+              <thead>
+                <tr>
+                  <th><input type="checkbox" title="select all rows"/>
+                      <span class="button-icon delete-record delete-record-always" title="Delete selected records"></span></th>
+                  <th>Remote clients<span class="button-icon add-record" title="Add new record"></span></th>
+                </tr>
+              </thead>
+              <tbody>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      </div>
+
+      <div class="zone-resource-records">
+        <table class="zone-records-table">
+          <thead>
+            <tr>
+              <th><input type="checkbox" title="select all rows"/>
+                  <span class="button-icon delete-record delete-record-always" title="Delete selected records"></span></th>
+              <th>Record</th><th>TTL</th><th>Type</th><th>Priority</th>
+              <th>Data<span class="button-icon add-record" title="Add new record"></span></th>
+            </tr>
+          </thead>
+          <tbody>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
