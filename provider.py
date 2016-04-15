@@ -558,8 +558,10 @@ class ButterflyDNS(ApplicationSession):
 
     @wamp.register('org.head.butterflydns.role.lookup')
     def role_lookup(self, *args, **details):
-        print('args: {}'.format(args))
-        print('details: {}'.format(details))
+        print('role lookup args: {}'.format(args))
+        print('role lookup details: {}'.format(details['detail']))
+        #for k in ('caller','caller_authid', 'caller_authrole', 'enc_algo', 'procedure', 'progress'):
+        #  print('  {:<30}={}'.format(k,getattr(details['detail'], k)))
 
         attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
                      'cbtid','cbtidExpires','department','displayName','jpegPhoto']
