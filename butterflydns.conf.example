@@ -1,0 +1,19 @@
+[main]
+site_irl      = wss://your.website/ws
+
+[ldap]
+valid_names   = valid.hostname.in.ssl.certificate
+host          = 10.0.0.1
+base          = ou=ButterflyDNS,dc=head,dc=org
+userdn        = cn=authenticator,ou=ButterflyDNS,dc=head,dc=org
+userpassword  = your-strong-authenticator-password
+
+[provider]
+roleUsername  = provider
+rolePassword  = your-strong-provider-password
+
+[postgresql]
+host          = 10.100.0.28
+database      = dns_data
+user          = butterfly
+password      = your-strong-pgsql-password
