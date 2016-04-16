@@ -1,4 +1,4 @@
-'use strict'; // this breaks autobahn-js silently
+'use strict';
 
 // user editable part, if document.location.hostname is not correct
 // alter this accordingly, it should be wss:// + hostname + /ws
@@ -993,8 +993,8 @@ $(document).on('click', '.zone-records-table>tbody>tr>td', function(ev){
 });
 
 function start_edit(tgt) {
-  ths = tgt.closest('table').children('thead').find('th');
-  tds = tgt.closest('tr').children();
+  var ths = tgt.closest('table').children('thead').find('th');
+  var tds = tgt.closest('tr').children();
 
   // replace the checkbox/trashcan with an ack/nack
   var td0 = $(tds[0]);
@@ -1021,7 +1021,7 @@ function start_edit(tgt) {
       $(tds[i]).html('<input type="number" oldvalue="'+oldvalue+'" value="'+elemvalue+'" />');
 
     } else if (select.indexOf(tv) > -1) {
-      var __ = [];
+      var __ = [], ___;
       __.push('<select oldvalue="'+oldvalue+'">');
       ___ = $.map(rtypes, function(v) {
         if (oldvalue === v) {
@@ -1047,8 +1047,9 @@ function start_edit(tgt) {
 // convert zone record input values back into td text
 
 function apply_records_table_changes(evt){
-  klass = evt.attr('class');
-  tname = evt.closest('div[class^="zone-edit-"]').attr('class');
+  var klass = evt.attr('class');
+  var tname = evt.closest('div[class^="zone-edit-"]').attr('class');
+  var endpoint, tds, ths;
 
   if (tname === 'zone-edit-xfr-acl') {
     endpoint='xfr-acl'
@@ -1313,7 +1314,6 @@ $(document).on('focusout keyup mouseleave', '.zone-edit-meta-value, .zone-record
 
   if (evp[0].nodeName === 'TD') {
     // find the apply-changes button, switch to this as target
-    fig=ev;
     ev = $(ev.closest('tr').find('span.apply-changes')[0]);
     apply_records_table_changes(ev);
   } else {
@@ -1448,9 +1448,8 @@ $(document).on('click', 'span.add-record', function(ev){
   ev.preventDefault();
 
   // add a table to this row
-  evt = $(ev.target);
+  var evt = $(ev.target);
   var tb = evt.closest('table').find('tbody');
-  figr=ev;
   var tdl = evt.closest('table').find('thead>tr').children('th').slice(1);
   var ntr = '<tr class="new-record"><td><input type="checkbox"/><span class="button-icon delete-record"></span></td>';
 
