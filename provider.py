@@ -4,28 +4,21 @@ This is the standalone provider for crossbar that provides all the RPCs and pub/
 operation of ButterflyDNS
 """
 
-__version__  = '1.1'
+__version__  = '1.2'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2016-Apr-14 23:36Z'
+__date__     = '2016-Apr-19 04:02Z'
 __license__  = 'Apache 2.0'
 
-from os import environ
 import aiopg
 import asyncio
 import base64
 import configparser
 import datetime
-import ldap3
 import logging
-import pprint
-import psycopg2
-import psycopg2.extras
 import pythonwhois
-import random
 import re
 import ssl
-import sys
 import time
 import traceback
 import txaio
@@ -38,23 +31,18 @@ logging.captureWarnings(True)
 import dns.exception
 import dns.query
 import dns.message
-from dns.rdatatype import A, AAAA, NS, MX, SOA, NONE, ANY, to_text as rdatatype_to_text
-from dns.rdataclass import IN, ANY as RDC_ANY
-from dns.resolver import Resolver, get_default_resolver
-from dns.rcode import *
+from dns.rdatatype import A, AAAA, NS, MX, to_text
+from dns.resolver import Resolver
+from dns.rcode import NOERROR
+from dns.rcode import NXDOMAIN
 
-from dateutil.parser import parse as tsparse
-from ldap3 import Server, Connection, Tls, ALL, ALL_ATTRIBUTES, AUTH_SIMPLE
+from ldap3 import Server, Connection, Tls, ALL_ATTRIBUTES, AUTH_SIMPLE
 from ldap3 import LDAPInvalidCredentialsResult, LDAPSizeLimitExceededResult, LDAPException
 from ldap3.core.exceptions import LDAPSessionTerminatedByServer
-from ldap3.utils.log import set_library_log_detail_level, set_library_log_activation_level
-from ldap3.utils.log import OFF, BASIC, NETWORK, EXTENDED
 
 from autobahn                import wamp
 from autobahn.asyncio.wamp   import ApplicationSession, ApplicationRunner
-from autobahn.wamp.exception import ApplicationError
-from autobahn.wamp.types     import PublishOptions, SubscribeOptions, RegisterOptions, EventDetails
-from autobahn.wamp           import register, subscribe
+from autobahn.wamp.types     import PublishOptions, SubscribeOptions, RegisterOptions
 
 txaio.start_logging(level='info')
 
@@ -163,7 +151,6 @@ def Bget_zone_ns_glue(zone):
         print('get zone glue for: {!r}'.format(zone))
 
         zone         = zone.strip('.')
-        dead_servers = {}
 
         # get NS for TLD
         tld     = zone.split('.')[-1]
@@ -300,6 +287,7 @@ class LDAP():
                 time.sleep(1)
 
             except Exception as e:
+                print(e)
                 raise
 
         self.ctx = ctx
@@ -1129,7 +1117,6 @@ class ButterflyDNS(ApplicationSession):
         @asyncio.coroutine
         def _zone_xfr_acl_delete(pool, data):
             with (yield from pool.cursor()) as cur:
-                now  = datetime.datetime.utcnow();
                 data = data[0]
 
                 # now delete the record

@@ -5,25 +5,23 @@ will instantiate the below AuthenticatorSession() class, you do not need to run 
 yourself.
 """
 
-__version__  = '1.1'
+__version__  = '1.2'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2016-Apr-14 23:31Z'
+__date__     = '2016-Apr-19 04:02Z'
 __license__  = 'Apache 2.0'
 
 
-import os
 import ssl
+import time
 import base64
 import hashlib
 import datetime
 import configparser
 from dateutil import parser as dateparser
-from ldap3 import Server, Connection, Tls, ALL, ALL_ATTRIBUTES, AUTH_SIMPLE
+from ldap3 import Server, Connection, Tls, ALL_ATTRIBUTES, AUTH_SIMPLE
 from ldap3 import LDAPInvalidCredentialsResult, LDAPSizeLimitExceededResult, LDAPException
 from ldap3.core.exceptions import LDAPSessionTerminatedByServer
-from ldap3.utils.log import set_library_log_detail_level, set_library_log_activation_level
-from ldap3.utils.log import OFF, BASIC, NETWORK, EXTENDED
 
 from pprint import pprint
 from base64 import urlsafe_b64decode as dcode
@@ -81,6 +79,7 @@ class LDAP():
                 time.sleep(1)
 
             except Exception as e:
+                print('LDAP error: {}'.format(e))
                 raise
 
         self.ctx = ctx
@@ -137,7 +136,6 @@ class AuthenticatorSession(ApplicationSession):
          attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
                      'cbtid','cbtidExpires','department','displayName','jpegPhoto']
 
-         base=self.cfg.get('ldap','base')
          self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
                attributes=attributes)
 
