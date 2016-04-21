@@ -363,6 +363,8 @@ table.zone-records-table thead tr th:nth-child(4) { min-width:4rem; }
 table.zone-records-table thead tr th:nth-child(5) { min-width:4rem; }
 table.zone-records-table thead tr th:nth-child(6) { min-width:20rem;}
 
+table.zone-records-table tr:hover { background-color: rgba(0,191,255,.1); }
+
 table.zone-edit-xfr-acl tbody tr td:nth-child(2) { text-align:right;}
 table.zone-edit-xfr-acl table thead tr th:nth-child(2) { width:20rem; position:relative;}
 
