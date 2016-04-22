@@ -5,10 +5,10 @@ will instantiate the below AuthenticatorSession() class, you do not need to run 
 yourself.
 """
 
-__version__  = '1.2'
+__version__  = '1.2.1'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2016-Apr-19 04:02Z'
+__date__     = '2016-Apr-21 00:51Z'
 __license__  = 'Apache 2.0'
 
 
@@ -19,15 +19,21 @@ import hashlib
 import datetime
 import configparser
 from dateutil import parser as dateparser
-from ldap3 import Server, Connection, Tls, ALL_ATTRIBUTES, AUTH_SIMPLE
-from ldap3 import LDAPInvalidCredentialsResult, LDAPSizeLimitExceededResult, LDAPException
+from ldap3 import Server
+from ldap3 import Connection
+from ldap3 import Tls
+from ldap3 import ALL_ATTRIBUTES
+from ldap3 import AUTH_SIMPLE
+from ldap3 import LDAPInvalidCredentialsResult
+from ldap3 import LDAPSizeLimitExceededResult
+from ldap3 import LDAPException
 from ldap3.core.exceptions import LDAPSessionTerminatedByServer
+from ldap3.core.exceptions import LDAPSocketReceiveError
 
 from pprint import pprint
 from base64 import urlsafe_b64decode as dcode
 
 from twisted.internet.defer import inlineCallbacks
-
 from autobahn.twisted.wamp import ApplicationSession
 from autobahn.wamp.exception import ApplicationError
 
@@ -75,7 +81,7 @@ class LDAP():
                     raise Exception('Failed to bind')
                 break
 
-            except LDAPSessionTerminatedByServer:
+            except (LDAPSessionTerminatedByServer, LDAPSocketReceiveError):
                 time.sleep(1)
 
             except Exception as e:
@@ -92,7 +98,7 @@ class LDAP():
         try:
             self.ctx.search(base, filter, attributes=attributes)
             print('search finished')
-        except LDAPSessionTerminatedByServer:
+        except (LDAPSessionTerminatedByServer, LDAPSocketReceiveError):
             self.retry_connect()
             self.ctx.search(base, filter, attributes=attributes)
 
