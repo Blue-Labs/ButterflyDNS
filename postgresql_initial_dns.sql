@@ -451,11 +451,6 @@ COPY authorized_users (username, password, permission, network) FROM stdin;
 --
 
 COPY canonical (rid, domain, content, admin, owner, created, updated) FROM stdin;
-90	99	0.255.10.in-addr.arpa	David Ford	\N	\N	\N
-107	116	ovas-master.wh.verio.net	David Ford	\N	\N	\N
-108	117	1.255.10.in-addr.arpa	David Ford	\N	\N	\N
-120	129	20.10.in-addr.arpa	David Ford	\N	\N	\N
-122	131	corp.verio.net	David Ford	\N	\N	\N
 \.
 
 
@@ -463,7 +458,7 @@ COPY canonical (rid, domain, content, admin, owner, created, updated) FROM stdin
 -- Name: canonical_cid_seq; Type: SEQUENCE SET; Schema: public; Owner: bind
 --
 
-SELECT pg_catalog.setval('canonical_cid_seq', 132, true);
+SELECT pg_catalog.setval('canonical_cid_seq', 1, true);
 
 
 --
@@ -471,9 +466,6 @@ SELECT pg_catalog.setval('canonical_cid_seq', 132, true);
 --
 
 COPY owners (manager, contact, actual_owner, rid) FROM stdin;
-david	David Ford <david@blue-labs.org>	\N	1
-mjh	Matthew Harmon <mjh@itys.net>	\N	2
-david-z2e	David Ford <david@blue-labs.org>	Erik (z2e)	3
 \.
 
 
@@ -481,7 +473,7 @@ david-z2e	David Ford <david@blue-labs.org>	Erik (z2e)	3
 -- Name: owners_rid_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('owners_rid_seq', 7, true);
+SELECT pg_catalog.setval('owners_rid_seq', 1, true);
 
 
 --
@@ -489,56 +481,6 @@ SELECT pg_catalog.setval('owners_rid_seq', 7, true);
 --
 
 COPY record (rid, host, zone, ttl, type, priority, data, created, updated) FROM stdin;
-790	@	99	21600	SOA		ranger.blue-labs.org. david.blue-labs.org. 1440734032 21600 3600 604800 3600	2010-05-13 08:53:16.40112-04	2010-05-13 16:22:02.99333-04
-792	@	99	21600	NS		ranger.blue-labs.org.	2010-05-13 08:53:16.456048-04	2010-05-13 08:54:15.740875-04
-794	5	99	21600	PTR		ranger.vpn.blue-labs.org.	2010-05-13 08:55:54.974962-04	2010-05-13 09:03:42.715255-04
-1849	2	99	21600	PTR		vss.vpn.blue-labs.org.	2011-12-23 23:20:25.544636-05	2011-12-23 23:20:25.52507-05
-1855	91	99	21600	PTR		oscar.vpn.blue-labs.org.	2012-01-27 17:34:50.439656-05	2012-01-27 17:34:50.438711-05
-1298	@	116	21600	SOA		ranger.blue-labs.org. david.blue-labs.org. 1458013513 21600 3600 604800 3600 	2010-11-22 23:55:28.277328-05	2016-03-15 03:45:13.215007-04
-1300	@	116	21600	NS		ranger.blue-labs.org.	2010-11-22 23:55:28.320278-05	2010-11-22 23:55:28.320278-05
-1305	@	116	21600	A		10.255.1.11	2010-11-22 23:55:28.356461-05	2010-11-23 00:01:03.57687-05
-1307	@	116	21600	MX	10	mail.security-carpet.com.	2010-11-22 23:55:28.372448-05	2016-03-15 03:44:58.758614-04
-1309	@	116	21600	TXT		v=spf1 ip6:2001:470:d:3de::/64 ip6:2001:470:4:1d8::/64 ip6:2001:470:1f07:916::/64 a mx include:security-carpet.com -all	2010-11-22 23:55:28.388452-05	2016-03-15 03:44:56.087897-04
-1310	www	116	21600	CNAME		@	2010-11-22 23:55:28.397264-05	2010-11-22 23:55:28.397264-05
-1311	@	117	21600	SOA		ranger.blue-labs.org. david.blue-labs.org. 1439503056 21600 3600 604800 3600	2010-11-23 00:03:07.234854-05	2010-11-23 00:06:34.304494-05
-1312	@	117	21600	NS		ranger.blue-labs.org.	2010-11-23 00:03:07.245502-05	2010-11-23 00:03:59.344123-05
-1314	11	117	21600	PTR		ovas-master.vpn.security-carpet.com.	2010-11-23 00:04:32.659377-05	2014-01-31 02:47:40.957215-05
-1900	12	117	21600	PTR		lab.vpn.security-carpet.com.	2012-11-10 04:15:20.655433-05	2012-11-10 04:15:20.654263-05
-1901	18	117	21600	PTR		jump2.vpn.security-carpet.com.	2012-11-10 04:15:40.794937-05	2014-01-31 02:48:13.723244-05
-1905	16	117	21600	PTR		jump0.vpn.security-carpet.com.	2012-12-05 01:55:24.279357-05	2014-01-31 02:47:59.037515-05
-1906	17	117	21600	PTR		jump1.vpn.security-carpet.com.	2012-12-05 01:55:54.033613-05	2014-01-31 02:48:06.525681-05
-1907	30	117	21600	PTR		pandora.vpn.blue-labs.org.	2012-12-06 23:00:43.785571-05	2012-12-06 23:00:43.784523-05
-1992	19	117	21600	PTR		arch-gluster.vpn.security-carpet.com.	2014-05-14 18:45:32.479036-04	2014-05-14 18:45:32.478193-04
-1993	20	117	21600	PTR		yubi-validation-server.vpn.security-carpet.com.	2014-05-14 18:46:02.640243-04	2014-05-14 18:46:02.639341-04
-1996	10	117	21600	PTR		vibbler.vpn.security-carpet.com.	2014-06-11 11:24:28.860515-04	2014-06-11 11:24:28.8597-04
-1997	8	117	21600	PTR		db.vpn.security-carpet.com.	2014-06-11 11:24:40.088063-04	2014-06-11 11:24:40.087244-04
-2064	9	117	21600	PTR		vibbler.vpn.security-carpet.com.	2015-06-30 14:36:39.284876-04	2015-06-30 14:41:20.11668-04
-2065	7	117	21600	PTR		abt.vpn.security-carpet.com.	2015-06-30 14:42:08.688233-04	2015-06-30 14:42:08.687382-04
-2068	27	117	21600	PTR		gitlab.vpn.security-carpet.com.	2015-08-13 17:50:06.528921-04	2015-08-13 17:57:36.350243-04
-1930	@	129	21600	SOA		ranger.blue-labs.org. david@blue-labs.org. 1377765803 21600 3600 604800 86400	2013-08-29 04:26:24.036287-04	2013-08-29 04:26:24.036058-04
-1931	0	129	21600	NS		verio.corp.nameserver.blue-labs.org.	2013-08-29 04:27:12.268825-04	2013-08-29 04:27:58.341237-04
-1932	@	129	21600	NS		ranger.blue-labs.org.	2013-08-29 04:43:23.294162-04	2013-08-29 04:43:23.293286-04
-1952	@	131	21600	SOA		security-carpet.com. dford@verio.net. 1390946807 21600 3600 604800 3600	2014-01-27 16:02:28.900411-05	2014-01-27 16:03:26.174011-05
-1954	@	131	21600	NS		ns.corp.verio.net.	2014-01-27 16:02:28.916073-05	2014-01-27 17:09:47.511748-05
-1959	@	131	21600	A		198.171.79.27	2014-01-27 16:02:28.924029-05	2014-01-27 17:10:17.504577-05
-1965	_ldap._tcp	131	21600	SRV		0 100 389 stngva1-dc02	2014-01-27 16:17:31.160498-05	2014-01-27 16:48:29.385287-05
-1966	_ldap._tcp	131	21600	SRV		0 100 389 stngva1-dc04	2014-01-27 16:23:18.870159-05	2014-01-27 16:48:34.236575-05
-1967	stngva1-dc02	131	21600	A		198.171.79.27	2014-01-27 16:29:41.445094-05	2014-01-27 16:29:41.444222-05
-1968	stngva1-dc04	131	21600	A		198.171.79.62	2014-01-27 16:30:04.524289-05	2014-01-27 16:30:04.52195-05
-1969	_kerberos._tcp	131	21600	SRV		15 100 88 stngva1-dc02	2014-01-27 16:37:05.708823-05	2014-01-27 16:47:47.367635-05
-1970	_kerberos._tcp	131	21600	SRV		15 100 88 stngva1-dc04	2014-01-27 16:37:20.054567-05	2014-01-27 16:47:52.626401-05
-1971	_kpasswd._tcp	131	21600	SRV		15 100 464 stngva1-dc02	2014-01-27 16:39:21.969571-05	2014-01-27 16:48:06.982384-05
-1972	_kpasswd._tcp	131	21600	SRV		15 100 464 stngva1-dc04	2014-01-27 16:39:41.022436-05	2014-01-27 16:48:12.724712-05
-1973	_gc._tcp	131	21600	SRV		15 100 3268 stngva1-dc02	2014-01-27 16:40:53.504299-05	2014-01-27 16:47:30.736389-05
-1974	_gc._tcp	131	21600	SRV		15 100 3268 stngva1-dc04	2014-01-27 16:41:02.66747-05	2014-01-27 16:47:40.467495-05
-1975	_kpasswd._udp	131	21600	SRV		15 100 464 stngva1-dc02	2014-01-27 16:42:24.004538-05	2014-01-27 16:48:18.424639-05
-1976	_kpasswd._udp	131	21600	SRV		15 100 464 stngva1-dc04	2014-01-27 16:42:36.758116-05	2014-01-27 16:48:23.891717-05
-1977	_kerberos._udp	131	21600	SRV		15 100 88 stngva1-dc02	2014-01-27 16:43:17.869035-05	2014-01-27 16:47:57.201517-05
-1978	_kerberos._udp	131	21600	SRV		15 100 88 stngva1-dc04	2014-01-27 16:43:29.208851-05	2014-01-27 16:48:02.027988-05
-1979	ns	131	21600	A		128.242.79.5	2014-01-27 17:10:07.388599-05	2014-01-27 17:10:07.38761-05
-1980	@	131	21600	A		198.171.79.62	2014-01-27 17:10:34.014753-05	2014-01-27 17:10:43.583171-05
-1981	irc	131	21600	A		208.55.255.77	2014-01-28 17:06:47.960414-05	2014-01-28 17:06:47.959524-05
-2004	sap	131	21600	A		198.106.137.20	2014-07-30 00:12:54.926067-04	2014-07-30 00:12:54.926067-04
 \.
 
 
@@ -546,7 +488,7 @@ COPY record (rid, host, zone, ttl, type, priority, data, created, updated) FROM 
 -- Name: record_rid_seq; Type: SEQUENCE SET; Schema: public; Owner: bind
 --
 
-SELECT pg_catalog.setval('record_rid_seq', 2240, true);
+SELECT pg_catalog.setval('record_rid_seq', 1, true);
 
 
 --
@@ -554,12 +496,6 @@ SELECT pg_catalog.setval('record_rid_seq', 2240, true);
 --
 
 COPY std_ns_by_admin (admin, ns) FROM stdin;
-	colt.blue-labs.org
-	colt6.blue-labs.org
-	mustang.blue-labs.org
-	mustang6.blue-labs.org
-	ranger.blue-labs.org
-	ranger6.blue-labs.org
 \.
 
 
@@ -568,18 +504,6 @@ COPY std_ns_by_admin (admin, ns) FROM stdin;
 --
 
 COPY tld (rid, extension) FROM stdin;
-1	com
-7	biz
-3	org
-4	info
-5	net
-6	us
-2	arpa
-8	ro
-9	mn
-10	me
-11	cat
-12	pe
 \.
 
 
@@ -587,7 +511,7 @@ COPY tld (rid, extension) FROM stdin;
 -- Name: tld_tid_seq; Type: SEQUENCE SET; Schema: public; Owner: bind
 --
 
-SELECT pg_catalog.setval('tld_tid_seq', 17, true);
+SELECT pg_catalog.setval('tld_tid_seq', 1, true);
 
 
 --
@@ -602,7 +526,7 @@ COPY xfr (rid, zone, client, created, updated) FROM stdin;
 -- Name: xfr_xid_seq; Type: SEQUENCE SET; Schema: public; Owner: bind
 --
 
-SELECT pg_catalog.setval('xfr_xid_seq', 58, true);
+SELECT pg_catalog.setval('xfr_xid_seq', 1, true);
 
 
 --
@@ -610,11 +534,6 @@ SELECT pg_catalog.setval('xfr_xid_seq', 58, true);
 --
 
 COPY zone (rid, name, tld, comment, manager) FROM stdin;
-99	0.255.10.in-addr	2		david
-116	ovas-master.wh.verio	5		david
-117	1.255.10.in-addr	2		david
-129	20.10.in-addr	2		david
-131	corp.verio	5		david
 \.
 
 
@@ -622,7 +541,7 @@ COPY zone (rid, name, tld, comment, manager) FROM stdin;
 -- Name: zone_template_rid_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('zone_template_rid_seq', 3, true);
+SELECT pg_catalog.setval('zone_template_rid_seq', 1, true);
 
 
 --
@@ -630,7 +549,6 @@ SELECT pg_catalog.setval('zone_template_rid_seq', 3, true);
 --
 
 COPY zone_templates (rid, name, host, ttl, type, priority, data, created, updated) FROM stdin;
-3	david 1	@	21600	SOA	\N	ranger.blue-labs.org. david.blue-labs.org. 1449393832 21600 3600 604800 3600	2015-12-09 18:10:28.430917-05	\N
 \.
 
 
@@ -638,7 +556,7 @@ COPY zone_templates (rid, name, host, ttl, type, priority, data, created, update
 -- Name: zone_zid_seq; Type: SEQUENCE SET; Schema: public; Owner: bind
 --
 
-SELECT pg_catalog.setval('zone_zid_seq', 179, true);
+SELECT pg_catalog.setval('zone_zid_seq', 1, true);
 
 
 SET search_path = public, pg_catalog;
