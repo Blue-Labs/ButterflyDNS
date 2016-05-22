@@ -18,7 +18,6 @@ import base64
 import hashlib
 import datetime
 import configparser
-from dateutil import parser as dateparser
 from ldap3 import Server
 from ldap3 import Connection
 from ldap3 import Tls
@@ -32,7 +31,7 @@ from ldap3.core.exceptions import LDAPSocketReceiveError
 
 from pprint import pprint
 from base64 import urlsafe_b64decode as dcode
-
+from dateutil import parser as dateparser
 from twisted.internet.defer import inlineCallbacks
 from autobahn.twisted.wamp import ApplicationSession
 from autobahn.wamp.exception import ApplicationError
