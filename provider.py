@@ -544,6 +544,64 @@ class ButterflyDNS(ApplicationSession):
             self.cache[_type][zone]['data']    = data
 
 
+    def segment_txt_rr(self, text):
+        def _sgen(txt):
+            seg_size = 255
+            txt = txt.replace('"', '\\"').replace("'", "\\'")
+            while txt:
+                if txt[:seg_size].endswith('\\'):
+                    r = txt[:seg_size-1]
+                    txt = txt[seg_size-1:]
+                else:
+                    r = txt[:seg_size]
+                    txt = txt[seg_size:]
+                yield '"' + r + '"'
+
+        return ' '.join([x for x in _sgen(text)])
+
+
+    def unsegment_text_rr(self, rr):
+        # reassemble TXT record segments in order found
+        # "abc" "def" becomes "abcdef"
+        def _genc(s):
+            _l = len(s)
+            for _c in s:
+                yield _c
+
+        if rr[0] == '"':
+            rr = rr[1:-1]
+            out = []
+            _s = ''
+            _gs = iter(_genc(rr))
+
+            for c in _gs:
+                if c == '\\':
+                    c = next(_gs)
+
+                elif c == '"':
+                    out.append(_s)
+                    _s = ''
+
+                    while True:
+                        try:
+                            c = next(_gs)
+                        except StopIteration:
+                            break
+
+                        if c == '"':
+                            break
+
+                    continue
+
+                _s += c
+
+            out.append(_s)
+            rr = ''.join(out)
+
+        print('reassembled TXT: {}'.format(rr))
+        return rr
+
+
     @wamp.register('org.head.butterflydns.role.lookup')
     def role_lookup(self, *args, **details):
         print('role lookup args: {}'.format(args))
@@ -645,6 +703,7 @@ class ButterflyDNS(ApplicationSession):
 
             _ = yield from cur.fetchone()
             _ = (yield from self._make_dict_list(cur, [_]))[0]
+
             # note, SOA updates go to everyone
             return ('org.head.butterflydns.zone.records.get.soa', _)
 
@@ -733,11 +792,15 @@ class ButterflyDNS(ApplicationSession):
             r += sorted([x for x in _ if x[6] == 'NS' and x[7] == '@'])
             r += sorted([x for x in _ if x[6] == 'MX' and x[7] == '@'])
 
-            for x in _:
+            for i,x in enumerate(_):
                 if x[6] in ('SOA','NS','MX'):
                     if x[6] == 'SOA': continue
                     if x[6] == 'NS' and x[7] == '@': continue
                     if x[6] == 'MX' and x[7] == '@': continue
+
+                if x[6] == 'TXT':
+                    _[i] = (x[0],x[1],x[2],x[3],x[4],self.unsegment_text_rr(x[5]),x[6],x[7],x[8],x[9],x[10])
+
                 r.append(x)
 
             r2 = []
@@ -929,6 +992,9 @@ class ButterflyDNS(ApplicationSession):
                 # if TTL is blank, make it None
                 if data['ttl'] == '': data['ttl'] = None
 
+                if data['type'] == 'TXT':
+                    data['data'] = self.segment_txt_rr(data['data'])
+
                 q = '''INSERT
                          INTO  record
                                (host,zone,ttl,type,priority,data,created,updated)
@@ -948,6 +1014,9 @@ class ButterflyDNS(ApplicationSession):
                 rid = (yield from cur.fetchone())[0]
                 (topic,_data) = yield from self._update_zone_soa(data['zone'], now)
                 self.push_pub(topic,_data)
+
+                if data['type'] == 'TXT':
+                    data['data'] = self.unsegment_text_rr(data['data'])
 
                 data['rid'] = rid
 
@@ -978,6 +1047,9 @@ class ButterflyDNS(ApplicationSession):
 
                 if not data['ttl']: data['ttl'] = None
 
+                if data['type'] == 'TXT':
+                    data['data'] = self.segment_txt_rr(data['data'])
+
                 # we don't need the old data any more, we have the row id
                 yield from cur.execute('''UPDATE  record r
                                              SET  (host,ttl,type,priority,data,updated)
@@ -992,6 +1064,9 @@ class ButterflyDNS(ApplicationSession):
                 # one of these days we ought to put created & updated somewhere in here
                 data['updated'] = data['now'].strftime('%s')
                 del data['now']
+
+                if data['type'] == 'TXT':
+                    data['data'] = self.unsegment_text_rr(data['data'])
 
                 (topic,_data) = yield from self._update_zone_soa(data['zone'], now)
                 self.push_pub(topic,_data)
