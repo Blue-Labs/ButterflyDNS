@@ -167,9 +167,9 @@ function onchallenge (session, method, extra) {
     // initiator again
     var u,p;
     u = get_login_creds();
-    p=u['p'],u=u['u'];
+    p=u['p'], u=u['u'];
 
-    if (u === undefined || u.length === 0) {
+    if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
       fade_in_login();
       console.log('please login');
       connection.close();
