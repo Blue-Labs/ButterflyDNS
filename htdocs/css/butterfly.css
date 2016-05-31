@@ -222,6 +222,7 @@ html,body {
   box-shadow: 0 0 7px rgba(81, 168, 200, 1);
 }
 
+/* add animated red shadow glow around failure area */
 span.auth_fail {
   transition: all 0.50s ease-in-out;
   box-shadow:
@@ -406,7 +407,7 @@ td > input[type="text"] { width:100%; }
   	-moz-animation:turning_cw 5s infinite;
   	animation:turning_cw 5s infinite;
   	position:relative;
-  	opacity: 0.7; }
+  	opacity: 0.9; }
 
 /*#api-na-outer-circle:hover {
   	-webkit-box-shadow: 0 0 100px 15px #453D9B;
