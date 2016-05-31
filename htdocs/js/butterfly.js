@@ -8,7 +8,6 @@ var wsuri = 'wss://'+document.location.hostname+'/ws';
 // something that you feel is beneficial to others, please tell us at
 // https://github.com/Blue-Labs/ButterflyDNS/issues
 
-
 // zone record types
 var rtypes = ['A','AAAA','CNAME','HINFO','MBOXFW','MX','NAPTR','NS','PTR','SRV','TXT','URL',],
     ss,
@@ -16,8 +15,9 @@ var rtypes = ['A','AAAA','CNAME','HINFO','MBOXFW','MX','NAPTR','NS','PTR','SRV',
     ticket    = '';
 
 // initial subscriptions; this will grow/shrink as people navigate
-var wamp_subscriptions = {
-};
+// recently_fired_events helps us debounce rapid succession events
+var wamp_subscriptions = {},
+    recently_fired_events = {};
 
 function timeConverter(UNIX_timestamp){
   if (UNIX_timestamp === undefined) { return ''; }
@@ -64,8 +64,601 @@ function SetCaretAtEnd(elem) {
 $(document).ready(function(){
   $('div.api-not-available').show();
   $('div.api-messages').hide();
+
+  page_bindings();
 });
 
+function page_bindings() {
+  $(document).on('click', 'span.user-box input[type=button]#login', function(ev) {
+    ev.preventDefault();
+    register_creds();
+  });
+
+  $(document).on('keyup', 'span.user-box input', function(ev) {
+    ev.preventDefault();
+    if (ev.which !== 13) { return; }
+    register_creds();
+  });
+
+  $(document).on('click', 'span.user-box img.logout.button', function(ev) {
+    ev.preventDefault();
+    connection.close();
+
+    // this is done here so we don't disturb the user during momentary communication
+    // failure with the API
+    $('.zone-page').slideUp(function() {
+      $('.zone-page.zone-data-summary>table>tbody').empty();
+      $('.zone-page.zone-edit table.zone-records-table>tbody').empty();
+      $('.zone-page.zone-edit span.zone-edit-meta-svalue').empty();
+      $('.zone-page.zone-edit span.zone-edit-meta-value').empty();
+      $('.zone-page.zone-edit li').remove();
+    });
+    $('span.user-box div.logged-in-profile').toggle('slide', function() {
+      $.each(['department','username'], function(i,e) {
+        $('span.user-box div.logged-in-profile span.'+e).empty();
+      });
+      $('span.user-box div.logged-in-profile span.userpic').css({backgroundImage:''});
+    });
+    document.cookie = 'cbtid'+'=; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+
+    wamp_subscriptions={};
+    fade_in_login();
+  });
+
+  $(document).on('click', '.location-bar li', function(ev){
+    ev.preventDefault();
+
+    // reset div visibilities
+    $('.zone-page').hide();
+
+    var navi = $(ev.target).text();
+
+    var idxs = $.map($('.location-bar ul li'), function(e){
+        return $(e).text();
+    });
+
+    var offt = idxs.indexOf(navi);
+
+    $('.location-bar ul li').slice(offt+1).remove();
+
+    if (navi === 'Home') {
+      navi='zone-data-summary';
+    } else {
+      navi=navi.toLowerCase().replace(' ','-')
+    }
+
+    if (ev.originalEvent !== undefined) {
+      $('.'+navi).show(200);
+    }
+  });
+
+  // menu bar click callback
+  $(document).on('click', '.menu-bar li', function(ev){
+    var tgt = $(ev.target).text();
+
+    console.info(tgt);
+    if (tgt === 'Add zone') {
+      show_butterfly_tools();
+      zone_add(ev);
+    }
+
+    if (tgt == 'Tools') {
+      show_butterfly_tools();
+    }
+  });
+
+  // user selected a domain from the summary list
+  $(document).on('click', '.zone-data-summary>table>tbody>tr', function(ev){
+    var zone = $(ev.target).parent().children('td').first().next().text();
+
+    zone_records_myzone = zone;
+
+    $('.location-bar ul li').first().click();
+    $('.location-bar ul').append('<li>Zone Edit</li>');
+
+    $('.zone-edit-meta-value').html('');
+    $('.zone-edit-meta-svalue').html('');
+    $('.zone-edit p:contains("NS Glue")').next().children('ul').empty();
+    $('.zone-edit-xfr-acl table tbody tr').remove();
+    $('.zone-resource-records table tbody tr').remove();
+
+    $('.zone-edit p:contains("SOA")').removeClass('dead');
+    $('.zone-edit p:contains("Local")').removeClass('dead');
+    $('.zone-edit p:contains("Registrar")').removeClass('dead');
+    $('.zone-edit p:contains("NS Glue")').removeClass('dead');
+    $('.zone-edit p:contains("Zone transfer ACL")').removeClass('dead');
+    $('.zone-resource-records table thead th:last-child').removeClass('dead');
+
+    $('.zone-edit p:contains("SOA")').addClass('loading');
+    $('.zone-edit p:contains("Local")').addClass('loading');
+    $('.zone-edit p:contains("Registrar")').addClass('loading');
+    $('.zone-edit p:contains("NS Glue")').addClass('loading');
+    $('.zone-edit p:contains("Zone transfer ACL")').addClass('loading');
+    $('.zone-resource-records table thead th:last-child').addClass('loading');
+
+    $('.zone-edit').show(200);
+
+    var subs = {'records.get.local'             :zone_records_redraw_Local,
+                'records.get.registrar'         :zone_records_redraw_Registrar,
+                'records.get.ns_glue'           :zone_records_redraw_NS_Glue,
+                'records.get.zone_transfer_acl' :zone_records_redraw_Zone_transfer_ACL,
+                'records.get.resourcerecords'   :zone_records_redraw_Resource_Records,
+                'records.get.single_rr'         :zone_records_redraw_Single_RR,
+                'xfr-acls.get.single'           :zone_records_redraw_XFR_Single
+               };
+
+    var promises = []
+    $.each(subs, function(uri_k,f) {
+      var uri, p;
+      uri = 'org.head.butterflydns.zone.'+uri_k+'.'+zone;
+      p   = ss.subscribe(uri, f);
+      wamp_subscriptions[uri] = f;
+      promises.push(p);
+    });
+
+    // futile attempt to make the publishing happen asynchronously
+    $.when(promises).done(function(res,err,progress) {
+      //console.info(res,err,progress);
+
+      if (err !== undefined ) {
+        show_api_errors([err]);
+      } else {
+        setTimeout(function(){
+          ss.call('org.head.butterflydns.zone.records.send',[zone]);
+        }, 100);
+      }
+    });
+
+    /*
+    ss.call('org.head.butterflydns.zone.get_zone_glue',[zone], {}, {receive_progress:true}).then(
+      function(res) {
+        if (Object.keys(res)[0] === 'error') {
+          console.log('omg',res);
+          $('.zone-edit p:contains("NS Glue")').removeClass('loading').addClass('dead');
+          return;
+        }
+        if (Object.keys(res)[0] === 'warning') {
+          console.log('omg',res);
+          $('.zone-edit p:contains("NS Glue")').removeClass('loading');
+          return;
+        }
+        $('.zone-edit p:contains("NS Glue")').removeClass('loading');
+      },
+
+      function(err) {
+        console.info('got err:',err);
+        $('.zone-edit p:contains("NS Glue")').removeClass('loading').addClass('dead');
+      },
+
+      function (progress) {
+        console.log("Progress:",progress);
+      }
+    );
+    */
+
+    ev.preventDefault();
+  });
+
+  // apply the changes on the meta sections (SOA, Local, Zone transfer ACL)
+  $(document).on('click', '.zone-edit span.apply-changes', function(ev){
+    ev.preventDefault();
+    ev = $(ev.target);
+
+    if (ev.parent()[0].nodeName === 'TD') {
+      apply_records_table_changes(ev);
+    } else {
+      apply_changes(ev);
+    }
+  });
+
+  // surely these can be rewritten to match any tables :)
+  $(document).on('click', '.zone-data-summary>table>thead>tr>th:first-child>input', function(ev){
+    var c = $(ev.target).prop('checked');
+    $('.zone-data-summary>table>tbody>tr>td:first-child>input').prop('checked',c);
+  });
+  $(document).on('click', '.zone-resource-records>table>thead>tr>th:first-child>input', function(ev){
+    var c = $(ev.target).prop('checked');
+    $('.zone-resource-records>table>tbody>tr>td:first-child>input').prop('checked',c);
+  });
+
+  // start edit
+  $(document).on('click', '.zone-records-table>tbody>tr>td', function(ev){
+    ev.preventDefault();
+    //console.log(ev);
+    var tgt = $(ev.target);
+    //figr=tgt;
+
+    if (tgt.prop('nodeName') !== 'TD') {
+      tgt = tgt.closest('td');
+    }
+
+    if (tgt.children().length >= 1 ) {
+      // ignore clicks, this handler is for changing the table td's from text into inputs, NOT the checkbox/delete span
+      return;
+    }
+
+    //fig = tgt;
+
+    start_edit(tgt);
+  });
+
+  $(document).on('change', '.zone-template-editor>select#zone-template-names', function(ev){
+    tgt = $(ev.target);
+    console.log(ev);
+    var idx = $('#zone-template-names option:selected').index();
+    if (idx === 0) { return; }
+
+    // all others will use the template input elements
+    $('.zone-template-editor .template-box').slideDown();
+
+    if (idx === 1) { template_new(); }
+    // modify or delete
+  });
+
+  $(document).on('click', '.zone-edit-meta-value', function(ev){
+    ev.preventDefault();
+
+    // convert element data into input value
+    if ($(ev.target).is("input")) {
+      return;
+    }
+
+    var h = $(ev.target);
+    var mailto=false;
+    var oldvalue;
+
+    if (h.children().is('a')){
+      mailto=true;
+      oldvalue = $(h.children('a')[0]).attr('oldvalue');
+      h = $(h.children('a')[0]).text();
+    } else {
+      oldvalue = h.attr('oldvalue');
+      h = h.text();
+    }
+
+    if (oldvalue === undefined) { oldvalue=h }
+
+    if (mailto) {
+        $(ev.target).html('<input type="text" oldvalue="'+oldvalue+'" value="'+h+'" mailto/>');
+    } else {
+        $(ev.target).html('<input type="text" oldvalue="'+oldvalue+'" value="'+h+'"/>');
+    }
+
+    var i = $(ev.target).children('input').first();
+    i.focus();
+    SetCaretAtEnd(i);
+
+  });
+
+  $(document).on('keyup', function(ev) {
+    if (ev.ctrlKey === true && ev.which === 36) {
+      // reload the home summary screen
+      $('.zone-data-summary').show(200);
+    }
+  });
+
+  $(document).on('focusout keyup mouseleave', '.zone-edit-meta-value, .zone-records-table', function(ev){
+    var now = Date.now();
+
+
+    if (!$(ev.target).is("input")) {
+      return;
+    }
+
+    parent = $(ev.target).parent()[0].nodeName;
+    //console.log(ev,parent);
+
+    // multi element row
+    if (ev.type === 'keyup') {
+      if (parent === 'TD') {
+        if (ev.which === 9) {      // ignore ESC and HTAB if parent object is TD
+          return;
+        }
+      }
+
+      // applies to all input types
+      if (35 <= ev.which && ev.which <= 90) { // ignore normal characters on keyboard
+        return;
+      }
+
+      if (93 <= ev.which && ev.which <= 111) { // ignore numpad
+        return;
+      }
+
+      if (186 <= ev.which && ev.which <= 192) { // ignore: ; = , - . /
+        return;
+      }
+
+      if (219 <= ev.which && ev.which <= 222) { // ignore: [ \ ] '
+        return;
+      }
+
+      if ([16,17,18].indexOf(ev.which) > -1) {  // shift, ctrl, alt
+        return
+      }
+
+      if (ev.which === 8 || ev.which === 32) {        // ignore backspace or space
+        return;
+      }
+
+    } else {
+      if (ev.type === 'mouseleave' || ev.type === 'focusout') {
+        //console.log('ignoring event',ev);
+        //recently_fired_events[ev.target] = now;
+        //console.log('ignore mouseleave/focusout')
+        return;
+      }
+    }
+
+    //console.log('handling event',ev);
+
+
+    //if (['mouseleave','mouseout','focusout'].indexOf(ev.type) > 1) {
+    //  return;
+    //}
+
+    //if (!(ev.which === 27 || ev.which === 13 || ev.which === 9 || ev.type === 'mouseleave' || ev.type === 'mouseout' || ev.type === 'focusout')) {
+      //console.info('ignoring as ev.which is ',ev.which);
+    //  return;
+    //}
+
+    // filter out multiple events that happen inside 10 milliseconds
+    if (ev.target in recently_fired_events) {
+      if (recently_fired_events[ev.target] > now - 500) {
+        return;
+      } else {
+        //console.log('ev delta is',now - recently_fired_events[ev.target]);
+        delete recently_fired_events[ev.target];
+      }
+    }
+
+    recently_fired_events[ev.target] = now;
+
+    ev.preventDefault();
+    ev = $(ev.target);
+    var evp = ev.parent();
+
+    figr=evp;
+
+    if (evp[0].nodeName === 'TD') {
+      // find the apply-changes button, switch to this as target
+      ev = $(ev.closest('tr').find('span.apply-changes')[0]);
+      apply_records_table_changes(ev);
+    } else {
+      stop_edit(ev);
+      // ev is now an orphaned element that has been deleted
+      set_unset_save_icon(evp);
+    }
+  });
+
+  $(document).on('click', '.zone-edit span.delete-record', function(ev){
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    ev = $(ev.target);
+
+    // fire off the row deletion from here
+
+    if (ev.parent()[0].nodeName === 'TD') {
+      apply_records_table_changes(ev);
+      return;
+    }
+  });
+
+  $(document).on('click', '.zone-edit span.revert-changes', function(ev){
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    ev = $(ev.target);
+
+    if (ev.parent()[0].nodeName === 'TD') {
+      apply_records_table_changes(ev);
+      return;
+    }
+
+    // undo changes
+    var e = ev.prev();
+    var oldvalue = e.attr('oldvalue');
+
+    if (e.children().is('a')){
+      e.children('a').first().text(oldvalue);
+      e.children('a').first().attr('href',oldvalue);
+    } else {
+      oldvalue = e.attr('oldvalue');
+      e.text(oldvalue);
+    }
+
+    e.removeAttr('oldvalue');
+    e.next('span.revert-changes').remove();
+    sanity_check_soa_table();
+    set_unset_save_icon(e);
+  });
+
+  $(document).on('click', 'span.add-record', function(ev){
+    ev.preventDefault();
+
+    // add a table to this row
+    var evt = $(ev.target);
+    var tb = evt.closest('table').find('tbody');
+    var tdl = evt.closest('table').find('thead>tr').children('th').slice(1);
+    var ntr = '<tr class="new-record"><td><input type="checkbox"/><span class="button-icon delete-record"></span></td>';
+
+    $.each(tdl, function(n) { ntr+= '<td></td>'; });
+    ntr += '</tr>';
+
+    tb.append(ntr);
+    start_edit(tb.children().last().children().first().next());
+  });
+}
+
+
+/* WAMP authentication process
+ *
+ * page loads, connection.open() runs. the callback for connection.open() ensures the
+ * login box is faded out when it starts up.
+ *
+ * if we have recently logged in, our browser will have a cookie and authentication
+ * will happen automagically in the background, no challenge-response-authentication
+ * needed.
+ *
+ * if no recent login however, connection.open() will return a challenge and our
+ * connection.onchallenge callback (which is a function appropriately named onchallenge)
+ * will fire.
+ *
+ * onchallenge will check to see if our login credentials are available in the input
+ * elements. if not, it'll fade in the login box and halt the wamp connection attempt.
+ *
+ * when the user has entered their credentials, the page binding for the login element
+ * will run register_creds which updates our connection parameters and restarts
+ * connection.open again. this time everything will repeat but onchallenge will find
+ * credentials in our connection paramenters.
+ *
+ * connection.onchallenge will then submit these values as a response to our challenge.
+ *
+ * assuming correct credentials, connection.open will then get login details, populate
+ * the userbox with info, and slide it into view. subsequently we [re]store our known
+ * subscriptions (zones we've edited in this session) then an RPC call is made to
+ * trigger a summary of all of the zones being published to us.
+ *
+ */
+
+// the WAMP connection to the Router
+var connection = new autobahn.Connection({
+  url: wsuri,
+  realm: "butterflydns",
+  authmethods: ['cookie','ticket'],
+  authid: principal,
+  onchallenge: onchallenge
+});
+
+// fired when a fully authenticated connection is established and session attached
+connection.onopen = function (session, details) {
+  fade_out_login();
+  $('#api-na-content').html('Waiting for API ...');
+  ss=session;
+
+  if (details.authextra === undefined) {
+    // cookie auth doesn't get any details from our authenticator, so fetch them
+    // keep retrying if there's a problem
+    function get_role_details() {
+      session.call('org.head.butterflydns.role.lookup', [details.authid]).then(
+        function(res) { draw_details(res.extra); ponderous_attach(); },
+        function(err) { setTimeout(get_role_details, 5000); }
+      );
+    }
+
+    get_role_details();
+  } else {
+    /* cred login comes back fully loaded */
+    draw_details(details.authextra);
+    ponderous_attach();
+  }
+
+  // this delay is to allow the login box to finish fading out before we slide in
+  function draw_details(details) {
+    setTimeout(function(d) {
+      slide_in_profile(d);
+    }, 750, details);
+  }
+
+  // if our API is busy sharting itself, wait until it cleans up
+  function ponderous_attach() {
+    // how we figure out this is a new page load -- no subscriptions!
+    if (!('org.head.butterflydns.zones.summary' in wamp_subscriptions)) {
+      wamp_subscriptions['org.head.butterflydns.zones.summary'] = redraw_zones_summary;
+      wamp_subscriptions['org.head.butterflydns.zone.records.get.soa'] = zone_records_redraw_SOA;
+      resubscribe();
+
+      session.call('org.head.butterflydns.zones.summary.trigger').then(
+          function (res) {
+            $('.api-not-available').hide();
+            $('.menu-bar li').css({opacity:'1.0'});
+            $('.zone-page').css({opacity:1.0});
+          },
+          function (error) {
+            setTimeout(ponderous_attach, 5000);
+          }
+      );
+
+    } else {
+      console.info('this is a reconnect, just resub it all');
+      resubscribe();
+      $('.api-not-available').hide();
+      $('.menu-bar li').css({opacity:'1.0'});
+      $('.zone-page').css({opacity:1.0});
+    }
+  }
+}
+
+// fired when connection was lost (or could not be established)
+connection.onclose = function (reason, details) {
+  console.log("Connection lost: " + reason);
+  console.log(details);
+
+  if (details.reason === 'wamp.error.authentication_failed') {
+    console.log('uhm, shit?');
+    $('span.user-box').addClass('auth_fail');
+    $('#api-na-content').html('<br>Login needed');
+  }
+
+  $('.zone-page').css({opacity:.2});
+  $('.api-not-available').show();
+  $('.menu-bar li').css({opacity:'0.2'});
+}
+
+// if our connection.open() returns a challenge response, then
+// this callback will be fired. our connection.open() will either:
+//   a) succeed because of a cookie or,
+//   b) return a challenge requiring a username and password
+function onchallenge (session, method, extra) {
+  //console.info('challenge received:', session, method, extra);
+
+  if (method === "ticket") {
+    // if there's no u/p login cred yet, fade in the login window
+    // and ask the user to login. on cred submit, call connection.open()
+    // initiator again
+    var u,p;
+    u = get_login_creds();
+    p = u['p'], u = u['u'];
+
+    if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
+      fade_in_login();
+      $('#api-na-content').html('<br>Login needed');
+      connection.close();
+    } else {
+      return ticket;
+    }
+  } else {
+    console.warn("i can't handle this challenge method!",method);
+  }
+}
+
+// now actually open the connection
+connection.open();
+
+// copy our input element credential values to our global variables
+function register_creds() {
+  var u,p;
+  u         = get_login_creds()
+  ticket    = u['p'];
+  principal = u['u'];
+
+  $('span.user-box').removeClass('auth_fail');
+
+  // this line is a workaround for a wamp-js bug. the authid gets lost :/
+  console.info(connection._options.authid);
+  connection._options.authid = principal;
+
+  $('#api-na-content').html('<br>Logging in');
+  connection.open();
+}
+
+function get_login_creds() {
+  var u = $('span.user-box input#username').val(),
+      p = $('span.user-box input#password').val();
+
+  return {u, p};
+}
+
+// fade in the login is called when we need the user to input their credentials
 function fade_in_login() {
   $('span.user-box').css({zIndex:102});
   $('span.user-box div.anonymous-login').slideDown(500, function() {
@@ -81,6 +674,7 @@ function fade_in_login() {
   })
 }
 
+// we fade out the login as soon as the user has hit the login button
 function fade_out_login() {
   function fadeRunner(i) {
     if (i > 0) {
@@ -103,172 +697,6 @@ function slide_in_profile(d) {
   .parent().toggle('slide', {direction:'right'});
 }
 
-function register_creds() {
-  var u,p;
-  u         = get_login_creds()
-  ticket    = u['p'];
-  principal = u['u'];
-
-  $('span.user-box').removeClass('auth_fail');
-  connection._options.authid = principal;
-  connection.open();
-}
-
-$(document).on('click', 'span.user-box input[type=button]#login', function(ev) {
-  ev.preventDefault();
-  register_creds();
-});
-
-$(document).on('keyup', 'span.user-box input', function(ev) {
-  ev.preventDefault();
-  if (ev.which !== 13) { return; }
-  register_creds();
-});
-
-$(document).on('click', 'span.user-box img.logout.button', function(ev) {
-  ev.preventDefault();
-  console.log('logout');
-  connection.close();
-
-  // this is done here so we don't disturb the user during momentary communication
-  // failure with the API
-  $('.zone-page').slideUp(function() {
-    $('.zone-page.zone-data-summary>table>tbody').empty();
-    $('.zone-page.zone-edit table.zone-records-table>tbody').empty();
-    $('.zone-page.zone-edit span.zone-edit-meta-svalue').empty();
-    $('.zone-page.zone-edit span.zone-edit-meta-value').empty();
-    $('.zone-page.zone-edit li').remove();
-  });
-  $('span.user-box div.logged-in-profile').toggle('slide', function() {
-    $.each(['department','username'], function(i,e) {
-      $('span.user-box div.logged-in-profile span.'+e).empty();
-    });
-    $('span.user-box div.logged-in-profile span.userpic').css({backgroundImage:''});
-  });
-  document.cookie = 'cbtid'+'=; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-
-  wamp_subscriptions={};
-  fade_in_login();
-});
-
-function get_login_creds() {
-  var u = $('span.user-box input#username').val(),
-      p = $('span.user-box input#password').val();
-
-  return {u, p};
-}
-
-function onchallenge (session, method, extra) {
-  console.info('challenge received:', session, method, extra);
-
-  if (method === "ticket") {
-    // if there's no u/p login cred yet, fade in the login window
-    // and ask the user to login. on cred submit, call connection.open()
-    // initiator again
-    var u,p;
-    u = get_login_creds();
-    p=u['p'], u=u['u'];
-
-    if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
-      fade_in_login();
-      console.log('please login');
-      connection.close();
-    } else {
-      console.log('creds ready, send');
-      return ticket;
-    }
-  } else {
-    console.warn("i can't handle this challenge method!");
-  }
-}
-
-// the WAMP connection to the Router
-var connection = new autobahn.Connection({
-  url: wsuri,
-  realm: "butterflydns",
-  authmethods: ['cookie','ticket'],
-  authid: principal,
-  onchallenge: onchallenge
-});
-
-// fired when connection is established and session attached
-connection.onopen = function (session, details) {
-  fade_out_login();
-
-  ss=session;
-
-  /*console.info('my session id:',ss);
-  console.log("connected session with ID " + session.id);
-  console.log("authenticated using method '" + details.authmethod + "' and provider '" + details.authprovider + "'");
-  console.log("authenticated with authid '" + details.authid + "' and authrole '" + details.authrole + "'");
-  console.log('extra',details.authextra);*/
-
-  function draw_details(details) {
-    setTimeout(function(d) {
-      slide_in_profile(d);
-    }, 1000, details);
-  }
-
-  if (details.authextra === undefined) {
-    /* cookie auth doesn't get any details from our authenticator, so fetch them */
-    session.call('org.head.butterflydns.role.lookup', [details.authid]).then(
-      function(res) {
-        draw_details(res.extra);
-      },
-      function(error) {
-        console.log('lookup err:',error);
-      }
-    );
-  } else {
-    /* cred login comes back fully loaded */
-    draw_details(details.authextra);
-  }
-
-  $('.api-not-available').hide();
-  $('.menu-bar li').css({opacity:'1.0'});
-  $('.zone-page').css({opacity:1.0});
-
-
-
-  // how we figure out this is a new page load -- no subscriptions!
-  if (!('org.head.butterflydns.zones.summary' in wamp_subscriptions)) {
-    wamp_subscriptions['org.head.butterflydns.zones.summary'] = redraw_zones_summary;
-    wamp_subscriptions['org.head.butterflydns.zone.records.get.soa'] = zone_records_redraw_SOA;
-    resubscribe();
-
-    session.call('org.head.butterflydns.zones.summary.trigger').then(
-        function (res) {
-          //console.log('zones.summary.trigger called, got',res);
-        },
-        function (error) {
-          console.log("zones.summary.trigger failed", error);
-        }
-    );
-
-  } else {
-    console.info('this is a reconnect, just resub it all');
-    resubscribe();
-  }
-}
-
-// fired when connection was lost (or could not be established)
-connection.onclose = function (reason, details) {
-  console.log("Connection lost: " + reason);
-  console.log(details);
-
-  if (details.reason === 'wamp.error.authentication_failed') {
-    console.log('uhm, shit?');
-    $('span.user-box').addClass('auth_fail');
-  }
-
-  $('.zone-page').css({opacity:.2});
-  $('.api-not-available').show();
-  $('.menu-bar li').css({opacity:'0.2'});
-}
-
-// now actually open the connection
-connection.open();
-
 // we have to resubscribe to all of our subs if crossbar router is restarted
 // invisible WTFness evidenced by published events never appearing to us
 // surely our wamp module should handle that for us :P
@@ -286,7 +714,6 @@ function resubscribe() {
     }
   });
 }
-
 
 function redraw_zones_summary (args) {
   var tdata = '';
@@ -592,7 +1019,6 @@ function zone_records_redraw_Single_RR(args) {
         }, 2000);
     }
   }, 50);
-
 }
 
 function zone_records_redraw_XFR_Single(args) {
@@ -653,49 +1079,6 @@ function zone_records_redraw_XFR_Single(args) {
     }
   }, 50);
 }
-
-
-$(document).on('click', '.location-bar li', function(ev){
-  ev.preventDefault();
-
-  // reset div visibilities
-  $('.zone-page').hide();
-
-  var navi = $(ev.target).text();
-
-  var idxs = $.map($('.location-bar ul li'), function(e){
-      return $(e).text();
-  });
-
-  var offt = idxs.indexOf(navi);
-
-  $('.location-bar ul li').slice(offt+1).remove();
-
-  if (navi === 'Home') {
-    navi='zone-data-summary';
-  } else {
-    navi=navi.toLowerCase().replace(' ','-')
-  }
-
-  if (ev.originalEvent !== undefined) {
-    $('.'+navi).show(200);
-  }
-});
-
-// menu bar click callback
-$(document).on('click', '.menu-bar li', function(ev){
-  var tgt = $(ev.target).text();
-
-  console.info(tgt);
-  if (tgt === 'Add zone') {
-    show_butterfly_tools();
-    zone_add(ev);
-  }
-
-  if (tgt == 'Tools') {
-    show_butterfly_tools();
-  }
-});
 
 function zone_add(ev) {
   ev.preventDefault();
@@ -759,20 +1142,6 @@ CREATE TABLE zone_templates (
 
 */
 
-$(document).on('change', '.zone-template-editor>select#zone-template-names', function(ev){
-  tgt = $(ev.target);
-  console.log(ev);
-  var idx = $('#zone-template-names option:selected').index();
-  if (idx === 0) { return; }
-
-  // all others will use the template input elements
-  $('.zone-template-editor .template-box').slideDown();
-
-  if (idx === 1) { template_new(); }
-  // modify or delete
-
-
-});
 
 function template_new(){
   div_templ = $('.zone-template-editor')
@@ -784,110 +1153,6 @@ function template_delete(){
 
 var figr;
 var zone_records_myzone;
-
-// user selected a domain from the summary list
-$(document).on('click', '.zone-data-summary>table>tbody>tr', function(ev){
-  var zone = $(ev.target).parent().children('td').first().next().text();
-
-  zone_records_myzone = zone;
-
-  $('.location-bar ul li').first().click();
-  $('.location-bar ul').append('<li>Zone Edit</li>');
-
-  $('.zone-edit-meta-value').html('');
-  $('.zone-edit-meta-svalue').html('');
-  $('.zone-edit p:contains("NS Glue")').next().children('ul').empty();
-  $('.zone-edit-xfr-acl table tbody tr').remove();
-  $('.zone-resource-records table tbody tr').remove();
-
-  $('.zone-edit p:contains("SOA")').removeClass('dead');
-  $('.zone-edit p:contains("Local")').removeClass('dead');
-  $('.zone-edit p:contains("Registrar")').removeClass('dead');
-  $('.zone-edit p:contains("NS Glue")').removeClass('dead');
-  $('.zone-edit p:contains("Zone transfer ACL")').removeClass('dead');
-  $('.zone-resource-records table thead th:last-child').removeClass('dead');
-
-  $('.zone-edit p:contains("SOA")').addClass('loading');
-  $('.zone-edit p:contains("Local")').addClass('loading');
-  $('.zone-edit p:contains("Registrar")').addClass('loading');
-  $('.zone-edit p:contains("NS Glue")').addClass('loading');
-  $('.zone-edit p:contains("Zone transfer ACL")').addClass('loading');
-  $('.zone-resource-records table thead th:last-child').addClass('loading');
-
-  $('.zone-edit').show(200);
-
-  var subs = {'records.get.local'             :zone_records_redraw_Local,
-              'records.get.registrar'         :zone_records_redraw_Registrar,
-              'records.get.ns_glue'           :zone_records_redraw_NS_Glue,
-              'records.get.zone_transfer_acl' :zone_records_redraw_Zone_transfer_ACL,
-              'records.get.resourcerecords'   :zone_records_redraw_Resource_Records,
-              'records.get.single_rr'         :zone_records_redraw_Single_RR,
-              'xfr-acls.get.single'           :zone_records_redraw_XFR_Single
-             };
-
-  var promises = []
-  $.each(subs, function(uri_k,f) {
-    var uri, p;
-    uri = 'org.head.butterflydns.zone.'+uri_k+'.'+zone;
-    p   = ss.subscribe(uri, f);
-    wamp_subscriptions[uri] = f;
-    promises.push(p);
-  });
-
-  // futile attempt to make the publishing happen asynchronously
-  $.when(promises).done(function(res,err,progress) {
-    //console.info(res,err,progress);
-
-    if (err !== undefined ) {
-      show_api_errors([err]);
-    } else {
-      setTimeout(function(){
-        ss.call('org.head.butterflydns.zone.records.send',[zone]);
-      }, 100);
-    }
-  });
-
-  /*
-  ss.call('org.head.butterflydns.zone.get_zone_glue',[zone], {}, {receive_progress:true}).then(
-    function(res) {
-      if (Object.keys(res)[0] === 'error') {
-        console.log('omg',res);
-        $('.zone-edit p:contains("NS Glue")').removeClass('loading').addClass('dead');
-        return;
-      }
-      if (Object.keys(res)[0] === 'warning') {
-        console.log('omg',res);
-        $('.zone-edit p:contains("NS Glue")').removeClass('loading');
-        return;
-      }
-      $('.zone-edit p:contains("NS Glue")').removeClass('loading');
-    },
-
-    function(err) {
-      console.info('got err:',err);
-      $('.zone-edit p:contains("NS Glue")').removeClass('loading').addClass('dead');
-    },
-
-    function (progress) {
-      console.log("Progress:",progress);
-    }
-  );
-  */
-
-  ev.preventDefault();
-});
-
-// apply the changes on the meta sections (SOA, Local, Zone transfer ACL)
-$(document).on('click', '.zone-edit span.apply-changes', function(ev){
-  ev.preventDefault();
-  ev = $(ev.target);
-
-  if (ev.parent()[0].nodeName === 'TD') {
-    apply_records_table_changes(ev);
-  } else {
-    apply_changes(ev);
-  }
-});
 
 function apply_changes(ev) {
   console.info(ev);
@@ -961,37 +1226,6 @@ function show_api_errors(errors) {
   $('div.api-messages').slideDown();
 }
 
-// surely these can be rewritten to match any tables :)
-$(document).on('click', '.zone-data-summary>table>thead>tr>th:first-child>input', function(ev){
-  var c = $(ev.target).prop('checked');
-  $('.zone-data-summary>table>tbody>tr>td:first-child>input').prop('checked',c);
-});
-$(document).on('click', '.zone-resource-records>table>thead>tr>th:first-child>input', function(ev){
-  var c = $(ev.target).prop('checked');
-  $('.zone-resource-records>table>tbody>tr>td:first-child>input').prop('checked',c);
-});
-
-// start edit
-$(document).on('click', '.zone-records-table>tbody>tr>td', function(ev){
-  ev.preventDefault();
-  //console.log(ev);
-  var tgt = $(ev.target);
-  //figr=tgt;
-
-  if (tgt.prop('nodeName') !== 'TD') {
-    tgt = tgt.closest('td');
-  }
-
-  if (tgt.children().length >= 1 ) {
-    // ignore clicks, this handler is for changing the table td's from text into inputs, NOT the checkbox/delete span
-    return;
-  }
-
-  //fig = tgt;
-
-  start_edit(tgt);
-});
-
 function start_edit(tgt) {
   var ths = tgt.closest('table').children('thead').find('th');
   var tds = tgt.closest('tr').children();
@@ -1045,7 +1279,6 @@ function start_edit(tgt) {
 }
 
 // convert zone record input values back into td text
-
 function apply_records_table_changes(evt){
   var klass = evt.attr('class');
   var tname = evt.closest('div[class^="zone-edit-"]').attr('class');
@@ -1056,27 +1289,14 @@ function apply_records_table_changes(evt){
   } else {
     endpoint='record'
   }
-  //console.log('class is',tname);
 
   tds   = evt.closest('tr').children();
-
   ths   = $.map(evt.closest('table').children('thead').find('th'), function(e,i) { if (i>0) {return $(e).text().toLowerCase();} })
 
   ths.unshift('rid');
   ths[1]='host';
 
   if (klass.indexOf('apply-changes')>=0) {
-    /*
-    var ovals = $.map(tds, function(e, i) {
-      if (i === 0) { return; }
-      return $($(e).children()[0]).attr('oldvalue');
-    });
-    var nvals = $.map(tds, function(e, i) {
-      if (i === 0) { return; }
-      return $($(e).children()[0]).val();
-    });
-    */
-
     if (evt.closest('tr').hasClass('new-record')) {
       // push new record
       $('div.api-messages').slideUp();
@@ -1124,7 +1344,6 @@ function apply_records_table_changes(evt){
 
       vals['zone'] = $($('.zone-edit-meta-svalue')[0]).text();
 
-      //console.log('vals',vals);
       ss.call('org.head.butterflydns.zone.'+endpoint+'.update', [vals]).then(
         function (res) {
           //console.log("update_record() result:", res);
@@ -1184,144 +1403,6 @@ function apply_records_table_changes(evt){
     );
   }
 }
-
-
-$(document).on('click', '.zone-edit-meta-value', function(ev){
-  ev.preventDefault();
-
-  // convert element data into input value
-  if ($(ev.target).is("input")) {
-    return;
-  }
-
-  var h = $(ev.target);
-  var mailto=false;
-  var oldvalue;
-
-  if (h.children().is('a')){
-    mailto=true;
-    oldvalue = $(h.children('a')[0]).attr('oldvalue');
-    h = $(h.children('a')[0]).text();
-  } else {
-    oldvalue = h.attr('oldvalue');
-    h = h.text();
-  }
-
-  if (oldvalue === undefined) { oldvalue=h }
-
-  if (mailto) {
-      $(ev.target).html('<input type="text" oldvalue="'+oldvalue+'" value="'+h+'" mailto/>');
-  } else {
-      $(ev.target).html('<input type="text" oldvalue="'+oldvalue+'" value="'+h+'"/>');
-  }
-
-  var i = $(ev.target).children('input').first();
-  i.focus();
-  SetCaretAtEnd(i);
-
-});
-
-$(document).on('keyup', function(ev) {
-  if (ev.ctrlKey === true && ev.which === 36) {
-    // reload the home summary screen
-    $('.zone-data-summary').show(200);
-  }
-});
-
-var recently_fired_events = {};
-$(document).on('focusout keyup mouseleave', '.zone-edit-meta-value, .zone-records-table', function(ev){
-  var now = Date.now();
-
-
-  if (!$(ev.target).is("input")) {
-    return;
-  }
-
-  parent = $(ev.target).parent()[0].nodeName;
-  //console.log(ev,parent);
-
-  // multi element row
-  if (ev.type === 'keyup') {
-    if (parent === 'TD') {
-      if (ev.which === 9) {      // ignore ESC and HTAB if parent object is TD
-        return;
-      }
-    }
-
-    // applies to all input types
-    if (35 <= ev.which && ev.which <= 90) { // ignore normal characters on keyboard
-      return;
-    }
-
-    if (93 <= ev.which && ev.which <= 111) { // ignore numpad
-      return;
-    }
-
-    if (186 <= ev.which && ev.which <= 192) { // ignore: ; = , - . /
-      return;
-    }
-
-    if (219 <= ev.which && ev.which <= 222) { // ignore: [ \ ] '
-      return;
-    }
-
-    if ([16,17,18].indexOf(ev.which) > -1) {  // shift, ctrl, alt
-      return
-    }
-
-    if (ev.which === 8 || ev.which === 32) {        // ignore backspace or space
-      return;
-    }
-
-  } else {
-    if (ev.type === 'mouseleave' || ev.type === 'focusout') {
-      //console.log('ignoring event',ev);
-      //recently_fired_events[ev.target] = now;
-      //console.log('ignore mouseleave/focusout')
-      return;
-    }
-  }
-
-  //console.log('handling event',ev);
-
-
-  //if (['mouseleave','mouseout','focusout'].indexOf(ev.type) > 1) {
-  //  return;
-  //}
-
-  //if (!(ev.which === 27 || ev.which === 13 || ev.which === 9 || ev.type === 'mouseleave' || ev.type === 'mouseout' || ev.type === 'focusout')) {
-    //console.info('ignoring as ev.which is ',ev.which);
-  //  return;
-  //}
-
-  // filter out multiple events that happen inside 10 milliseconds
-  if (ev.target in recently_fired_events) {
-    if (recently_fired_events[ev.target] > now - 500) {
-      return;
-    } else {
-      //console.log('ev delta is',now - recently_fired_events[ev.target]);
-      delete recently_fired_events[ev.target];
-    }
-  }
-
-  recently_fired_events[ev.target] = now;
-
-  ev.preventDefault();
-  ev = $(ev.target);
-  var evp = ev.parent();
-
-  figr=evp;
-
-  if (evp[0].nodeName === 'TD') {
-    // find the apply-changes button, switch to this as target
-    ev = $(ev.closest('tr').find('span.apply-changes')[0]);
-    apply_records_table_changes(ev);
-  } else {
-    stop_edit(ev);
-    // ev is now an orphaned element that has been deleted
-    set_unset_save_icon(evp);
-  }
-});
 
 // this applies to a single input element
 function stop_edit(ev) {
@@ -1402,60 +1483,3 @@ function sanity_check_soa_table() {
 
   });
 }
-
-$(document).on('click', '.zone-edit span.delete-record', function(ev){
-  ev.preventDefault();
-  ev.stopImmediatePropagation();
-  ev = $(ev.target);
-
-  // fire off the row deletion from here
-
-  if (ev.parent()[0].nodeName === 'TD') {
-    apply_records_table_changes(ev);
-    return;
-  }
-});
-
-$(document).on('click', '.zone-edit span.revert-changes', function(ev){
-  ev.preventDefault();
-  ev.stopImmediatePropagation();
-  ev = $(ev.target);
-
-  if (ev.parent()[0].nodeName === 'TD') {
-    apply_records_table_changes(ev);
-    return;
-  }
-
-  // undo changes
-  var e = ev.prev();
-  var oldvalue = e.attr('oldvalue');
-
-  if (e.children().is('a')){
-    e.children('a').first().text(oldvalue);
-    e.children('a').first().attr('href',oldvalue);
-  } else {
-    oldvalue = e.attr('oldvalue');
-    e.text(oldvalue);
-  }
-
-  e.removeAttr('oldvalue');
-  e.next('span.revert-changes').remove();
-  sanity_check_soa_table();
-  set_unset_save_icon(e);
-});
-
-$(document).on('click', 'span.add-record', function(ev){
-  ev.preventDefault();
-
-  // add a table to this row
-  var evt = $(ev.target);
-  var tb = evt.closest('table').find('tbody');
-  var tdl = evt.closest('table').find('thead>tr').children('th').slice(1);
-  var ntr = '<tr class="new-record"><td><input type="checkbox"/><span class="button-icon delete-record"></span></td>';
-
-  $.each(tdl, function(n) { ntr+= '<td></td>'; });
-  ntr += '</tr>';
-
-  tb.append(ntr);
-  start_edit(tb.children().last().children().first().next());
-});
