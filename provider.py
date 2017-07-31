@@ -272,12 +272,12 @@ def Bget_zone_ns_glue(zone):
 class LDAP():
     def __init__(self, cfg):
         self.cfg         = cfg
-        self.valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
-        self.host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
-        self.port        = int(cfg.get('ldap', 'port', fallback='389'))
-        self.base        = cfg.get('ldap', 'base')
-        self.userdn      = cfg.get('ldap', 'userdn')
-        self.passwd      = cfg.get('ldap', 'userpassword')
+        self.valid_names = _cfg_List(cfg, 'authentication', 'valid_names')
+        self.host        = cfg.get('authentication', 'host', fallback='127.0.0.1')
+        self.port        = int(cfg.get('authentication', 'port', fallback='389'))
+        self.base        = cfg.get('authentication', 'base')
+        self.userdn      = cfg.get('authentication', 'userdn')
+        self.passwd      = cfg.get('authentication', 'userpassword')
         self.retry_connect()
 
 
@@ -642,7 +642,7 @@ class ButterflyDNS(ApplicationSession):
             principal={}
             principal.update(self._ldap.ctx.response[0]['attributes'])
 
-            if 'jpegPhoto' in principal
+            if 'jpegPhoto' in principal:
                 if principal['jpegPhoto']:
                     if isinstance(principal['jpegPhoto'], list):
                         principal['jpegPhoto'] = [base64.b64encode(p) for p in principal['jpegPhoto']]
@@ -1477,14 +1477,14 @@ if __name__ == '__main__':
     if not irl:
         s = "section [main]; required config option '{}' not found".format('site_irl')
 
-    host,*port = (cfg['ldap']['host']).rsplit(':',1)
+    host,*port = (cfg['authentication']['host']).rsplit(':',1)
     port       = port and port[0] or '389'
-    cfg['ldap']['host'] = host
-    cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
+    cfg['authentication']['host'] = host
+    cfg['authentication']['port'] = cfg.get('authentication', 'port', fallback=port)
 
     for key in ('valid_names','host','userdn','userpassword','base'):
-        if not cfg.get('ldap', key):
-            s = "section [ldap]; required config option '{}' not found".format(key)
+        if not cfg.get('authentication', key):
+            s = "section [authentication]; required config option '{}' not found".format(key)
             raise KeyError(s)
 
     for key in ('roleUsername','rolePassword'):

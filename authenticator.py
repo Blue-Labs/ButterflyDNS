@@ -5,18 +5,21 @@ will instantiate the below AuthenticatorSession() class, you do not need to run 
 yourself.
 """
 
-__version__  = '1.2.2'
+__version__  = '1.2.3'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2017-Jul-31 02:48Z'
+__date__     = '2017-Jul-31 03:28Z'
 __license__  = 'Apache 2.0'
 
 
 import ssl
 import time
+import txaio
 import base64
+import string
 import hashlib
 import datetime
+import traceback
 import configparser
 
 from ldap3 import Server
@@ -27,10 +30,7 @@ from ldap3 import ALL
 from ldap3 import SUBTREE
 from ldap3 import LEVEL
 from ldap3 import MODIFY_REPLACE
-from ldap3 import AUTH_SIMPLE
-from ldap3 import LDAPInvalidCredentialsResult
-from ldap3 import LDAPSizeLimitExceededResult
-from ldap3 import LDAPException
+from ldap3 import SIMPLE
 
 from ldap3.core.exceptions import LDAPInvalidCredentialsResult
 from ldap3.core.exceptions import LDAPSizeLimitExceededResult
@@ -45,6 +45,8 @@ from twisted.internet.defer  import inlineCallbacks
 from autobahn.twisted.wamp   import ApplicationSession
 from autobahn.wamp.exception import ApplicationError
 
+txaio.start_logging(level='debug')
+txaio.use_twisted()
 
 # configparser helpers
 def _cfg_None(config, section, key):
@@ -61,18 +63,23 @@ def _cfg_List(config, section, key):
 
 class LDAP():
     def __init__(self, cfg):
+        self.logger      = txaio.make_logger()
         self.cfg         = cfg
-        self.valid_names = _cfg_List(cfg, 'ldap', 'valid_names')
-        self.host        = cfg.get('ldap', 'host', fallback='127.0.0.1')
-        self.port        = int(cfg.get('ldap', 'port', fallback='389'))
-        self.base        = cfg.get('ldap', 'base')
-        self.userdn      = cfg.get('ldap', 'userdn')
-        self.passwd      = cfg.get('ldap', 'userpassword')
-        self.retry_connect()
+        self.valid_names = _cfg_List(cfg, 'authentication', 'valid_names')
+        self.host        = cfg.get('authentication', 'host', fallback='127.0.0.1')
+        self.port        = int(cfg.get('authentication', 'port', fallback='389'))
+        self.base        = cfg.get('authentication', 'base')
+        self.userdn      = cfg.get('authentication', 'userdn')
+        self.username    = ''
+        self.password    = ''
+
 
     def retry_connect(self):
         deadtime = datetime.datetime.utcnow() + datetime.timedelta(seconds=60)
         self.ctx = None
+
+        username = 'cn={},{}'.format(self.username,self.base)
+        self.logger.info('attempting authentication using: {}'.format(username))
 
         while deadtime > datetime.datetime.utcnow():
             try:
@@ -86,24 +93,25 @@ class LDAP():
                                  get_info=ALL,
                                  tls=tlso)
                 ctx     = Connection(server,
-                                  user=self.userdn,
-                                  password=self.passwd,
+                                  user=username,
+                                  password=self.password,
                                   raise_exceptions=True,
                                   authentication=SIMPLE)
                 ctx.open()
                 ctx.start_tls()
                 if not ctx.bind():
-                    print('oh shit, authenticator failed to bind')
-                    raise Exception('Failed to bind')
+                    self.logger.warning('Bind error: {}'.format(ctx.result))
+                    raise ApplicationError('org.blue_labs.ldap.error',
+                                           'Failed to bind: {}'.format(ctx.result))
                 break
 
             except (LDAPSessionTerminatedByServerError, LDAPSocketReceiveError) as e:
-                print('LDAP server connect error: {}'.format(e))
-                time.sleep(1)
+                self.logger.error('LDAP server connect error: {}'.format(e))
+                time.sleep(2)
 
             except Exception as e:
-                print('LDAP error: {}'.format(e))
-                raise
+                self.logger.critical('LDAP error: {}'.format(e))
+                raise ApplicationError('org.blue_labs.ldap.error:{}'.format(e))
 
         self.ctx = ctx
 
@@ -113,9 +121,10 @@ class LDAP():
         if not base:
             base = self.base
         try:
+            self.logger.info('ldap.rsearch: base:{} filter:{}'.format(base, filter))
             self.ctx.search(base, filter, attributes=attributes)
             print('search finished')
-        except (LDAPSessionTerminatedByServer, LDAPSocketReceiveError):
+        except (LDAPSessionTerminatedByServerError, LDAPSocketReceiveError):
             self.retry_connect()
             self.ctx.search(base, filter, attributes=attributes)
 
@@ -124,34 +133,42 @@ class LDAP():
 class AuthenticatorSession(ApplicationSession):
     @inlineCallbacks
     def onJoin(self, details):
-        print("WAMP-Ticket dynamic authenticator joined: {}".format(details))
+        self.logger      = txaio.make_logger()
+        self.logger.info("WAMP-Ticket dynamic authenticator joined: {}".format(details))
 
-        # we expect to be started by crossbar and crossbar's CWD will be $path/.crossbar/
-        # allow exceptions to propogate up to the router
-        cfg = configparser.ConfigParser()
-        cfg.read('../butterflydns.conf')
-        host,*port = (cfg['ldap']['host']).rsplit(':',1)
-        port       = port and port[0] or '389'
-        cfg['ldap']['host'] = host
-        cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
+        try:
+            self._ldap
+        except:
+            # we expect to be started by crossbar and crossbar's CWD will be $path/.crossbar/
+            # allow exceptions to propogate up to the router
+            cfg = configparser.ConfigParser()
+            cfg.read('../butterflydns.conf')
+            host,*port = (cfg['authentication']['host']).rsplit(':',1)
+            port       = port and port[0] or '389'
+            cfg['authentication']['host'] = host
+            cfg['authentication']['port'] = cfg.get('authentication', 'port', fallback=port)
 
-        for key in ('valid_names','host','userdn','userpassword','base'):
-            if not cfg.get('ldap', key):
-                s = "section [ldap]; required config option '{}' not found".format(key)
-                raise KeyError(s)
 
-        self.cfg = cfg
-        self._ldap = LDAP(cfg)
+            for key in ('valid_names','host','userdn','userpassword','base'):
+                if not cfg.get('authentication', key):
+                    s = "section [authentication]; required config option '{}' not found".format(key)
+                    raise KeyError(s)
+
+            self.cfg = cfg
+            self._ldap = LDAP(cfg)
+            self._ldap.username = cfg.get('authentication','userdn').split(',',1)[0].split('=',1)[1]
+            self._ldap.password = cfg.get('authentication','userpassword')
+            self._ldap.retry_connect()
 
         def checkPassword(challenge_password, password):
-            challenge_bytes = dcode(challenge_password)[6:]
+            challenge_bytes = dcode(challenge_password[6:])
             digest,salt     = challenge_bytes[:20],challenge_bytes[20:]
             hr = hashlib.sha1(password.encode())
             hr.update(salt)
             return digest == hr.digest()
 
         def authenticate(realm, authid, details):
-            print("WAMP-Ticket dynamic authenticator invoked: realm='{}', authid='{}', details=".format(realm, authid))
+            self.logger.info("WAMP-Ticket dynamic authenticator invoked: realm='{}', authid='{}', details=".format(realm, authid))
             pprint(details)
             gnow = datetime.datetime.now(datetime.timezone.utc)
             ticket = details['ticket']
@@ -163,7 +180,7 @@ class AuthenticatorSession(ApplicationSession):
                  attributes=attributes)
 
             if not len(self._ldap.ctx.response) == 1:
-                raise ApplicationError(u'org.head.butterflydns.invalid_credentials',
+                raise ApplicationError(u'org.head.butterflydns.invalid_credentials.1',
                   "could not authenticate session - invalid credentials '{}' for principal {}"\
                   .format(ticket, authid))
 
@@ -197,17 +214,17 @@ class AuthenticatorSession(ApplicationSession):
                   .format(ticket, authid))
 
             # .strftime('%Y%m%d%H%M%SZ')
-            nB = dateparser.parse(principal['notBefore'][0])
-            nA = dateparser.parse(principal['notAfter'][0])
+            nB = principal['notBefore']
+            nA = principal['notAfter']
             if not ( nB < gnow < nA ):
                 raise ApplicationError(u'org.head.butterflydns.expired_ticket', "could not authenticate session - expired ticket '{}' for principal {}".format(ticket, authid))
 
             if not checkPassword(principal['rolePassword'][0], ticket):
-                raise ApplicationError(u'org.head.butterflydns.invalid_credentials', "could not authenticate session - invalid credentials '{}' for principal {}".format(ticket, authid))
+                raise ApplicationError(u'org.head.butterflydns.invalid_credentials.2', "could not authenticate session - invalid credentials '{}' for principal {}".format(ticket, authid))
 
             res = {
                 'realm': principal['realm'][0],
-                'role':  principal['role'][0],
+                'role':  principal['role'],
                 'extra': {
                      'roleAdmin': principal['roleAdmin'],
                      'jpegPhoto': principal['jpegPhoto'],
@@ -227,11 +244,11 @@ class AuthenticatorSession(ApplicationSession):
                 }
             }
 
-            print("WAMP-Ticket authentication success: {}".format(resp))
+            self.logger.info("WAMP-Ticket authentication success: {d}", d=resp)
             return res
 
-    try:
-        yield self.register(authenticate, 'org.head.butterflydns.authenticate')
-        print("WAMP-Ticket dynamic authenticator registered!")
-    except Exception as e:
-        print("Failed to register dynamic authenticator: {0}".format(e))
+        try:
+            yield self.register(authenticate, 'org.head.butterflydns.authenticate')
+            self.logger.info("WAMP-Ticket dynamic authenticator registered!")
+        except Exception as e:
+            self.logger.critical("Failed to register dynamic authenticator: {0}".format(e))
