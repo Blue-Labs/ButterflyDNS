@@ -346,6 +346,7 @@ table thead tr th { text-align:left; padding-left:.25rem; }
 
 table tbody tr td {
   text-align:left; vertical-align:top;
+  word-break:break-all;
   padding: 0 .25rem;
   border-bottom:1px solid #eee;
   border-right: 1px solid rgba(238,238,238,.5);
@@ -466,7 +467,7 @@ td > input[type="text"] { width:100%; }
   	animation:turning_cw 5s infinite; }
 
 #api-na-content {
-  	position:absolute;
+    position:absolute;
   	top: 10px;
   	left: 10px;
   	width: 120px;
