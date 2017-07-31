@@ -8,7 +8,7 @@ yourself.
 __version__  = '1.2.2'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2017-Jul-31 02:12Z'
+__date__     = '2017-Jul-31 02:48Z'
 __license__  = 'Apache 2.0'
 
 
@@ -48,15 +48,15 @@ from autobahn.wamp.exception import ApplicationError
 
 # configparser helpers
 def _cfg_None(config, section, key):
-   return  config.get(section, key, fallback=None) or \
-      config.get('default', key, fallback=None) or \
-      None
+    return config.get(section, key, fallback=None) or \
+        config.get('default', key, fallback=None) or \
+        None
 
 def _cfg_List(config, section, key):
-   v = _cfg_None(config, section, key)
-   if not v:
-      return
-   return [x for x in v.replace(',', ' ').split(' ') if x]
+    v = _cfg_None(config, section, key)
+    if not v:
+        return
+    return [x for x in v.replace(',', ' ').split(' ') if x]
 
 
 class LDAP():
@@ -98,8 +98,8 @@ class LDAP():
                 break
 
             except (LDAPSessionTerminatedByServerError, LDAPSocketReceiveError) as e:
-              print('LDAP server connect error: {}'.format(e))
-              time.sleep(1)
+                print('LDAP server connect error: {}'.format(e))
+                time.sleep(1)
 
             except Exception as e:
                 print('LDAP error: {}'.format(e))
@@ -122,116 +122,116 @@ class LDAP():
 
 
 class AuthenticatorSession(ApplicationSession):
-   @inlineCallbacks
-   def onJoin(self, details):
-      print("WAMP-Ticket dynamic authenticator joined: {}".format(details))
+    @inlineCallbacks
+    def onJoin(self, details):
+        print("WAMP-Ticket dynamic authenticator joined: {}".format(details))
 
-      # we expect to be started by crossbar and crossbar's CWD will be $path/.crossbar/
-      # allow exceptions to propogate up to the router
-      cfg = configparser.ConfigParser()
-      cfg.read('../butterflydns.conf')
-      host,*port = (cfg['ldap']['host']).rsplit(':',1)
-      port       = port and port[0] or '389'
-      cfg['ldap']['host'] = host
-      cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
+        # we expect to be started by crossbar and crossbar's CWD will be $path/.crossbar/
+        # allow exceptions to propogate up to the router
+        cfg = configparser.ConfigParser()
+        cfg.read('../butterflydns.conf')
+        host,*port = (cfg['ldap']['host']).rsplit(':',1)
+        port       = port and port[0] or '389'
+        cfg['ldap']['host'] = host
+        cfg['ldap']['port'] = cfg.get('ldap', 'port', fallback=port)
 
-      for key in ('valid_names','host','userdn','userpassword','base'):
-         if not cfg.get('ldap', key):
-            s = "section [ldap]; required config option '{}' not found".format(key)
-            raise KeyError(s)
+        for key in ('valid_names','host','userdn','userpassword','base'):
+            if not cfg.get('ldap', key):
+                s = "section [ldap]; required config option '{}' not found".format(key)
+                raise KeyError(s)
 
-      self.cfg = cfg
-      self._ldap = LDAP(cfg)
+        self.cfg = cfg
+        self._ldap = LDAP(cfg)
 
-      def checkPassword(challenge_password, password):
-         challenge_bytes = dcode(challenge_password)[6:]
-         digest,salt     = challenge_bytes[:20],challenge_bytes[20:]
-         hr = hashlib.sha1(password.encode())
-         hr.update(salt)
-         return digest == hr.digest()
+        def checkPassword(challenge_password, password):
+            challenge_bytes = dcode(challenge_password)[6:]
+            digest,salt     = challenge_bytes[:20],challenge_bytes[20:]
+            hr = hashlib.sha1(password.encode())
+            hr.update(salt)
+            return digest == hr.digest()
 
-      def authenticate(realm, authid, details):
-         print("WAMP-Ticket dynamic authenticator invoked: realm='{}', authid='{}', details=".format(realm, authid))
-         pprint(details)
-         gnow = datetime.datetime.now(datetime.timezone.utc)
-         ticket = details['ticket']
+        def authenticate(realm, authid, details):
+            print("WAMP-Ticket dynamic authenticator invoked: realm='{}', authid='{}', details=".format(realm, authid))
+            pprint(details)
+            gnow = datetime.datetime.now(datetime.timezone.utc)
+            ticket = details['ticket']
 
-         attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
-                     'cbtid','cbtidExpires','department','displayName','jpegPhoto']
+            attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
+                       'cbtid','cbtidExpires','department','displayName','jpegPhoto']
 
-         self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
-               attributes=attributes)
+            self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
+                 attributes=attributes)
 
-         if not len(self._ldap.ctx.response) == 1:
-            raise ApplicationError(u'org.head.butterflydns.invalid_credentials',
-              "could not authenticate session - invalid credentials '{}' for principal {}"\
-              .format(ticket, authid))
+            if not len(self._ldap.ctx.response) == 1:
+                raise ApplicationError(u'org.head.butterflydns.invalid_credentials',
+                  "could not authenticate session - invalid credentials '{}' for principal {}"\
+                  .format(ticket, authid))
 
-         principal = self._ldap.ctx.response[0]['attributes']
+            principal = self._ldap.ctx.response[0]['attributes']
 
-         if not isinstance(principal['realm'], list):
-            principal['realm'] = [principal['realm']]
+            if not isinstance(principal['realm'], list):
+                principal['realm'] = [principal['realm']]
 
-         if not 'roleAdmin' in principal:
-            principal['roleAdmin'] = [False]
-         if not 'jpegPhoto' in principal:
-            principal['jpegPhoto'] = ['']
-         if not 'displayName' in principal:
-            principal['displayName'] = [authid]
-         if not 'department' in principal:
-            principal['department'] = ['bit mover']
-         if not isinstance(principal['department'], list):
-            principal['department'] = [principal['department']]
-         if not len(principal['department']):
-            principal['department'] = ['bit mover']
+            if not 'roleAdmin' in principal:
+                principal['roleAdmin'] = [False]
+            if not 'jpegPhoto' in principal:
+                principal['jpegPhoto'] = ['']
+            if not 'displayName' in principal:
+                principal['displayName'] = [authid]
+            if not 'department' in principal:
+                principal['department'] = ['bit mover']
+            if not isinstance(principal['department'], list):
+                principal['department'] = [principal['department']]
+            if not len(principal['department']):
+                principal['department'] = ['bit mover']
 
-         if 'jpegPhoto' in principal and principal['jpegPhoto']:
+            if 'jpegPhoto' in principal and principal['jpegPhoto']:
                 if isinstance(principal['jpegPhoto'], list):
                     principal['jpegPhoto'] = [base64.b64encode(p) for p in principal['jpegPhoto']]
                 else:
                     principal['jpegPhoto'] = base64.b64encode(principal['jpegPhoto'])
 
-         if not 'notBefore' in principal and 'notAfter' in principal:
-            raise ApplicationError(u'org.head.butterflydns.invalid_role_configured',
-              "couldn't authenticate session - invalid role configuration '{}' for principal {}"\
-              .format(ticket, authid))
+            if not 'notBefore' in principal and 'notAfter' in principal:
+                raise ApplicationError(u'org.head.butterflydns.invalid_role_configured',
+                  "couldn't authenticate session - invalid role configuration '{}' for principal {}"\
+                  .format(ticket, authid))
 
-         # .strftime('%Y%m%d%H%M%SZ')
-         nB = dateparser.parse(principal['notBefore'][0])
-         nA = dateparser.parse(principal['notAfter'][0])
-         if not ( nB < gnow < nA ):
-            raise ApplicationError(u'org.head.butterflydns.expired_ticket', "could not authenticate session - expired ticket '{}' for principal {}".format(ticket, authid))
+            # .strftime('%Y%m%d%H%M%SZ')
+            nB = dateparser.parse(principal['notBefore'][0])
+            nA = dateparser.parse(principal['notAfter'][0])
+            if not ( nB < gnow < nA ):
+                raise ApplicationError(u'org.head.butterflydns.expired_ticket', "could not authenticate session - expired ticket '{}' for principal {}".format(ticket, authid))
 
-         if not checkPassword(principal['rolePassword'][0], ticket):
-            raise ApplicationError(u'org.head.butterflydns.invalid_credentials', "could not authenticate session - invalid credentials '{}' for principal {}".format(ticket, authid))
+            if not checkPassword(principal['rolePassword'][0], ticket):
+                raise ApplicationError(u'org.head.butterflydns.invalid_credentials', "could not authenticate session - invalid credentials '{}' for principal {}".format(ticket, authid))
 
-         res = {
-            'realm': principal['realm'][0],
-            'role':  principal['role'][0],
-            'extra': {
-               'roleAdmin': principal['roleAdmin'],
-               'jpegPhoto': principal['jpegPhoto'],
-               'department': principal['department'],
-               'displayName': principal['displayName']
+            res = {
+                'realm': principal['realm'][0],
+                'role':  principal['role'][0],
+                'extra': {
+                     'roleAdmin': principal['roleAdmin'],
+                     'jpegPhoto': principal['jpegPhoto'],
+                     'department': principal['department'],
+                     'displayName': principal['displayName']
+                }
             }
-         }
 
-         resp = {
-            'realm': principal['realm'],
-            'role':  principal['role'],
-            'extra': {
-               'roleAdmin': principal['roleAdmin'],
-               'jpegPhoto': '<suppressed>',
-               'department': principal['department'],
-               'displayName': principal['displayName']
+            resp = {
+                'realm': principal['realm'],
+                'role':  principal['role'],
+                'extra': {
+                     'roleAdmin': principal['roleAdmin'],
+                     'jpegPhoto': '<suppressed>',
+                     'department': principal['department'],
+                     'displayName': principal['displayName']
+                }
             }
-         }
 
-         print("WAMP-Ticket authentication success: {}".format(resp))
-         return res
+            print("WAMP-Ticket authentication success: {}".format(resp))
+            return res
 
-      try:
-         yield self.register(authenticate, 'org.head.butterflydns.authenticate')
-         print("WAMP-Ticket dynamic authenticator registered!")
-      except Exception as e:
-         print("Failed to register dynamic authenticator: {0}".format(e))
+    try:
+        yield self.register(authenticate, 'org.head.butterflydns.authenticate')
+        print("WAMP-Ticket dynamic authenticator registered!")
+    except Exception as e:
+        print("Failed to register dynamic authenticator: {0}".format(e))

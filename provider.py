@@ -7,7 +7,7 @@ operation of ButterflyDNS
 __version__  = '1.5'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2017-Jul-31 02:02Z'
+__date__     = '2017-Jul-31 02:48Z'
 __license__  = 'Apache 2.0'
 
 import aiopg
@@ -551,14 +551,14 @@ class ButterflyDNS(ApplicationSession):
 
 
     def set_cache(self, _type, zone, data, expires):
-            if not _type in self.cache:
-                self.cache[_type] = {}
+        if not _type in self.cache:
+            self.cache[_type] = {}
 
-            if not zone in self.cache[_type]:
-                self.cache[_type][zone] = {}
+        if not zone in self.cache[_type]:
+            self.cache[_type][zone] = {}
 
-            self.cache[_type][zone]['expires'] = expires
-            self.cache[_type][zone]['data']    = data
+        self.cache[_type][zone]['expires'] = expires
+        self.cache[_type][zone]['data']    = data
 
 
     def segment_txt_rr(self, text):
