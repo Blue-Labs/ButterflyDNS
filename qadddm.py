@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-__version__  = '2.0'
+__version__  = '2.2'
 __author__   = 'David Ford <david@blue-labs.org>'
-__date__     = '2016-Mar-18 20:48E'
+__date__     = '2017-Jul-30 20:26E'
 __title__    = 'BlueLabs ButterflyDNS tools'
 __license__  = 'Apache 2.0'
 
@@ -38,9 +38,8 @@ import select
 import json
 import traceback
 import datetime
+import sys
 
-# this needs to get WAMP'd instead of sending an email ;-)
-# this email is to report breakage btw
 import smtplib
 from email.utils                import formatdate, getaddresses
 from email.parser               import BytesParser, Parser
@@ -110,13 +109,13 @@ class FlitterButter():
     def __init__(self, logger=None):
         self.live = False
         self.conn = None
-        
+
         if not logger:
+            logging.basicConfig(level=logging.DEBUG)
             logger = logging.getLogger()
+            
         
         self.logger = logger
-        self._sql_connect()
-        self.run()
 
 
     def _check_online(self):
@@ -174,7 +173,10 @@ class FlitterButter():
     def run(self):
         __running = True
         poll_timeout = None
+        
+        self._check_online()
         conn = self.conn
+        self.logger.info('conn:{}, self.conn:{}'.format(conn, self.conn))
 
         with conn.cursor() as c:
             c.execute('LISTEN butterflydns')
@@ -187,7 +189,7 @@ class FlitterButter():
             
             if not x:
                 # timeout expired
-                pass
+                self._check_online()
 
             try:
                 conn.poll()
@@ -285,7 +287,7 @@ class FlitterButter():
         reporting_username = 'chickenlittle@blue-labs.org'
         headers = {'From':         '<{}>'.format(reporting_username),
                    'Subject':      'ButterflyDNS Sync Error',
-                   'Date':         '{}Z'.format(datetime.datetime.utcnow()),
+                   'Date':         '{}Z'.format(formatdate()),
                    'MIME-Version': '1.0',
                    }
         outer = MIMEMultipart()
@@ -297,15 +299,22 @@ class FlitterButter():
         
         recipients = ['thecowandthemoon@blue-labs.org',]
         
-        s = smtplib.SMTP(host='mail.blue-labs.org', timeout=60)
-        s.starttls()
-        s.ehlo('mustang.blue-labs.org')
-        s.login('mamamia', 'baelzebub-had-a-son!')
+        try:
+            s = smtplib.SMTP(host='mail.blue-labs.org', timeout=60)
+            s.starttls()
+            s.ehlo('mustang.blue-labs.org')
+            s.login('mamamia', 'baelzebub-had-a-son!')
 
-        s.send_message(outer, reporting_username, recipients, mail_options=['SMTPUTF8','BODY=8BITMIME'])
-        self.logger.info('email sent')
+            s.send_message(outer, reporting_username, recipients, mail_options=['SMTPUTF8','BODY=8BITMIME'])
+            self.logger.info('email sent')
+        except Exception as e:
+            self.logger.warning('failed to send report: {}'.format(e))
         
     
 if __name__ == '__main__':
     FitButt = FlitterButter()
-    FitButt.run()
+    while True:
+        try:
+            FitButt.run()
+        except KeyboardInterrupt:
+            sys.exit()
