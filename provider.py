@@ -4,10 +4,10 @@ This is the standalone provider for crossbar that provides all the RPCs and pub/
 operation of ButterflyDNS
 """
 
-__version__  = '1.2'
+__version__  = '1.5'
 __author__   = 'David Ford <david@blue-labs.org>'
 __email__    = 'david@blue-labs.org'
-__date__     = '2016-Apr-19 04:02Z'
+__date__     = '2017-Jul-31 02:02Z'
 __license__  = 'Apache 2.0'
 
 import aiopg
@@ -36,9 +36,26 @@ from dns.resolver import Resolver
 from dns.rcode import NOERROR
 from dns.rcode import NXDOMAIN
 
-from ldap3 import Server, Connection, Tls, ALL_ATTRIBUTES, AUTH_SIMPLE
-from ldap3 import LDAPInvalidCredentialsResult, LDAPSizeLimitExceededResult, LDAPException
-from ldap3.core.exceptions import LDAPSessionTerminatedByServer
+from ldap3 import Server
+from ldap3 import Connection
+from ldap3 import Tls
+from ldap3 import ALL_ATTRIBUTES
+from ldap3 import ALL
+from ldap3 import SUBTREE
+from ldap3 import LEVEL
+from ldap3 import MODIFY_ADD
+from ldap3 import MODIFY_REPLACE
+from ldap3 import MODIFY_DELETE
+from ldap3 import SIMPLE
+from ldap3 import HASHED_SALTED_SHA
+from ldap3.core.exceptions import LDAPInvalidCredentialsResult
+from ldap3.core.exceptions import LDAPSizeLimitExceededResult
+from ldap3.core.exceptions import LDAPException
+from ldap3.core.exceptions import LDAPSessionTerminatedByServerError
+from ldap3.core.exceptions import LDAPSocketReceiveError
+from ldap3.core.exceptions import LDAPAttributeOrValueExistsResult
+from ldap3.core.exceptions import LDAPNoSuchAttributeResult
+from ldap3.utils.hashed import hashed
 
 from autobahn                import wamp
 from autobahn.asyncio.wamp   import ApplicationSession, ApplicationRunner
@@ -275,7 +292,7 @@ class LDAP():
                               valid_names=self.valid_names)
                 server  = Server(self.host, port=self.port, use_ssl=False, tls=tlso)
                 ctx     = Connection(server, user=self.userdn, password=self.passwd,
-                                  raise_exceptions=True, authentication=AUTH_SIMPLE)
+                                  raise_exceptions=True, authentication=SIMPLE)
                 ctx.open()
                 ctx.start_tls()
                 if not ctx.bind():
@@ -283,7 +300,7 @@ class LDAP():
                     raise Exception('Failed to bind')
                 break
 
-            except LDAPSessionTerminatedByServer:
+            except (LDAPSessionTerminatedByServerError, LDAPSocketReceiveError):
                 time.sleep(1)
 
             except Exception as e:
@@ -611,17 +628,30 @@ class ButterflyDNS(ApplicationSession):
 
         attributes=['rolePassword','notBefore','notAfter','realm','role','roleAdmin',
                      'cbtid','cbtidExpires','department','displayName','jpegPhoto']
-        authid=args[0]
+        authid=details['detail'].caller_authid
 
         try:
             self._ldap.rsearch(filter='(roleUsername={authid})'.format(authid=authid),
                attributes=attributes)
         except Exception as e:
             print('exc: {}'.format(e))
-
+            raise ApplicationError('org.head.butterflydns.search_error', e)
 
         try:
-            principal = self._ldap.ctx.response[0]['attributes']
+            # WAMP cannot handle a dict like object from ldap, it has to be a real dict
+            principal={}
+            principal.update(self._ldap.ctx.response[0]['attributes'])
+
+            if 'jpegPhoto' in principal and principal['jpegPhoto']:
+                if isinstance(principal['jpegPhoto'], list):
+                    principal['jpegPhoto'] = [base64.b64encode(p) for p in principal['jpegPhoto']]
+                else:
+                    principal['jpegPhoto'] = base64.b64encode(principal['jpegPhoto'])
+
+            if args and 'all-attributes' in args[0]:
+                del principal['userPassword']
+                return principal
+
             if not 'roleAdmin' in principal:
                principal['roleAdmin'] = [False]
             if not 'jpegPhoto' in principal:
@@ -636,15 +666,17 @@ class ButterflyDNS(ApplicationSession):
 
             res = {
                 'extra': {
-                'roleAdmin': principal['roleAdmin'][0],
-                'jpegPhoto': principal['jpegPhoto'][0],
-                'department': principal['department'][0],
-                'displayName': principal['displayName'][0]
+                    'roleAdmin': principal['roleAdmin'],
+                    'jpegPhoto': principal['jpegPhoto'],
+                    'department': principal['department'],
+                    'displayName': principal['displayName']
                 }
             }
 
         except Exception as e:
             print('buttpuff {}'.format(e))
+            traceback.print_exc()
+            raise ApplicationError('org.head.butterflydns.search_error', e)
 
         return res
 
@@ -868,16 +900,19 @@ class ButterflyDNS(ApplicationSession):
     def _get_zone_ns_glue(self, zone):
         '''This is a SLOW callback and can take several seconds
         '''
-        data = self.get_cache('zone.ns_glue', zone)
-        if not data:
-            data = yield from Bget_zone_ns_glue(zone)
+        try:
+            data = self.get_cache('zone.ns_glue', zone)
+            if not data:
+                data = yield from Bget_zone_ns_glue(zone)
 
-            # use same expiration delta as registrar, if we happen to be faster than the
-            # registrar lookup, then simply don't cache this data set -- we'll cache it next
-            # time
-            if 'zone.registrar' in self.cache and zone in self.cache['zone.registrar']:
-                data = {'zone':zone, 'data':data}
-                self.set_cache('zone.ns_glue', zone, data, self.cache['zone.registrar'][zone]['expires'])
+                # use same expiration delta as registrar, if we happen to be faster than the
+                # registrar lookup, then simply don't cache this data set -- we'll cache it next
+                # time
+                if 'zone.registrar' in self.cache and zone in self.cache['zone.registrar']:
+                    data = {'zone':zone, 'data':data}
+                    self.set_cache('zone.ns_glue', zone, data, self.cache['zone.registrar'][zone]['expires'])
+        except:
+            traceback.print_exc()
 
         return ('org.head.butterflydns.zone.records.get.ns_glue.'+zone, data)
 
