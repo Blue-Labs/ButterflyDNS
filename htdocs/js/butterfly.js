@@ -3,21 +3,35 @@
 // user editable part, if document.location.hostname is not correct
 // alter this accordingly, it should be wss:// + hostname + /ws
 var wsuri = 'wss://'+document.location.hostname+'/ws';
+var wamp_uri_base = 'org.head.butterflydns.';
+var realm = 'butterflydns';
 
 // that's all. please leave the rest of this to me. however, if you change
 // something that you feel is beneficial to others, please tell us at
 // https://github.com/Blue-Labs/ButterflyDNS/issues
 
-// zone record types
-var rtypes = ['A','AAAA','CNAME','HINFO','MBOXFW','MX','NAPTR','NS','PTR','SRV','TXT','URL',],
-    ss,
-    principal = '',
-    ticket    = '';
+var __version__ = 'version 1.7';
 
-// initial subscriptions; this will grow/shrink as people navigate
+// zone record types
+var rtypes = ['A','AAAA','CNAME','HINFO','MBOXFW','MX','NAPTR','NS','PTR','SRV','TXT','URL',];
+
+// vars..initial subscriptions; this will grow/shrink as people navigate
 // recently_fired_events helps us debounce rapid succession events
-var wamp_subscriptions = {},
-    recently_fired_events = {};
+var connection, session, principal, ticket, wamp_subscriptions = {};
+var recently_fired_events = {};
+
+function show_api_errors(errors) {
+  var h = $.map(errors, function(v) {
+    return '<li>'+v+'</li>';
+  });
+
+  h.unshift('<ul>');
+  h.push('</ul>');
+  h = h.join('\n');
+
+  $('div.api-messages>div').html(h);
+  $('div.api-messages').slideDown();
+}
 
 function timeConverter(UNIX_timestamp){
   if (UNIX_timestamp === undefined) { return ''; }
@@ -65,10 +79,269 @@ $(document).ready(function(){
   $('div.api-not-available').show();
   $('div.api-messages').hide();
 
-  page_bindings();
+  page_bindings_wamplogin();
+  page_bindings_other();
+
+  /* WAMP authentication process
+   *
+   * page loads, connection.open() runs. the callback for connection.open() ensures the
+   * login box is faded out when it starts up.
+   *
+   * if we have recently logged in, our browser will have a cookie and authentication
+   * will happen automagically in the background, no challenge-response-authentication
+   * needed.
+   *
+   * if no recent login however, connection.open() will return a challenge and our
+   * connection.onchallenge callback (which is a function appropriately named onchallenge)
+   * will fire.
+   *
+   * onchallenge will check to see if our login credentials are available in the input
+   * elements. if not, it'll fade in the login box and halt the wamp connection attempt.
+   *
+   * when the user has entered their credentials, the page binding for the login element
+   * will run register_creds which updates our connection parameters and restarts
+   * connection.open again. this time everything will repeat but onchallenge will find
+   * credentials in our connection paramenters.
+   *
+   * connection.onchallenge will then submit these values as a response to our challenge.
+   *
+   * assuming correct credentials, connection.open will then get login details, populate
+   * the userbox with info, and slide it into view. subsequently we [re]store our known
+   * subscriptions (zones we've edited in this session) then an RPC call is made to
+   * trigger a summary of all of the zones being published to us.
+   *
+   */
+
+  // the WAMP connection to the Router
+  var connection = new autobahn.Connection({
+    url: wsuri,
+    realm: realm,
+    authmethods: ['cookie','ticket'],
+    authid: principal,
+    onchallenge: onchallenge
+  });
+
+  // fired when a fully authenticated connection is established and session attached
+  connection.onopen = function (ss, details) {
+    fade_out_login();
+    $('#api-na-content').html('Waiting for API ...');
+    session=ss;
+
+    // wait for the login to fully fade, then fill in our details
+    // yeah -- it's the wrong way to do it
+    function draw_details(details) {
+      setTimeout(function(d) {
+        //$('.api-not-available').hide();
+        slide_in_profile(d);
+      }, 750, details);
+    }
+
+    if (details.authextra === undefined) {
+      // cookie auth doesn't get any details from our authenticator, so fetch them
+      // keep retrying if there's a problem
+      function get_role_details() {
+        session.call(wamp_uri_base+'role.lookup').then(
+          function(res) { draw_details(res.extra); ponderous_attach(); },
+          function(err) {
+            if (err.error === 'wamp.error.no_such_procedure') {
+              // if no callee registered to handle this, then reschedule
+              setTimeout(get_role_details, 5000);
+            } else {
+              console.warn(err);
+              show_api_errors([err]);
+            }
+          }
+        );
+      }
+
+      get_role_details();
+    } else {
+      /* cred login comes back fully loaded */
+      draw_details(details.authextra);
+      ponderous_attach();
+    }
+
+    // if our API is busy sharting itself, wait until it cleans up
+    function ponderous_attach() {
+      // how we figure out this is a new page load -- no subscriptions!
+      if (!(wamp_uri_base+'zones.summary' in wamp_subscriptions)) {
+        wamp_subscriptions[wamp_uri_base+'zones.summary'] = redraw_zones_summary;
+        wamp_subscriptions[wamp_uri_base+'zone.records.get.soa'] = zone_records_redraw_SOA;
+        resubscribe();
+
+        session.call(wamp_uri_base+'zones.summary.trigger').then(
+            function (res) {
+              $('.api-not-available').hide();
+              $('.menu-bar li').css({opacity:'1.0'});
+              $('.zone-page').css({opacity:1.0});
+            },
+            function (error) {
+              setTimeout(ponderous_attach, 5000);
+            }
+        );
+
+      } else {
+        console.info('this is a reconnect, just resub it all');
+        resubscribe();
+        $('.api-not-available').hide();
+        $('.menu-bar li').css({opacity:'1.0'});
+        $('.zone-page').css({opacity:1.0});
+      }
+    }
+  }
+
+  function onchallenge(session, method, extra) {
+    //console.info('challenge received:', session, method, extra);
+
+    if (method === "ticket") {
+      // if there's no u/p login cred yet, fade in the login window
+      // and ask the user to login. on cred submit, call connection.open()
+      // initiator again
+      var u,p;
+      u = get_login_creds();
+      p = u['p'], u=u['u'];
+
+      if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
+        fade_in_login();
+        $('#api-na-content').html('Login needed');
+        connection.close();
+      } else {
+        return ticket;
+      }
+    } else {
+      console.warn("i can't handle this challenge method!");
+    }
+  }
+
+  // fired when connection was lost (or could not be established)
+  connection.onclose = function (reason, details) {
+    console.log("Connection lost: " + reason);
+    console.log(details);
+
+    if (details.reason === 'wamp.error.authentication_failed') {
+      console.warn('wamp.error.authentication_failed');
+      console.warn(details.message);
+      $('#api-na-content').html('Login needed');
+      $('span.user-box').addClass('auth-fail');
+      var error = details.message.match(/args=\[['"]?(.+?)['"]?\],/)[1];
+      show_api_errors([error]);
+    }
+
+    remove_sensitive_content();
+
+    $('.api-not-available').show();
+    $('.zone-page').css({opacity:.2});
+    $('.menu-bar li').css({opacity:0.2});
+  }
+
+  // now actually open the connection
+  connection.open();
 });
 
-function page_bindings() {
+// fade in the login is called when we need the user to input their credentials
+function fade_in_login() {
+  $('span.user-box').css({zIndex:102});
+  $('span.user-box div.anonymous-login').slideDown(500, function() {
+    $('span.user-box div.please-log-in').slideDown(500, function() {
+      function fadeRunner(i) {
+        if (i < 95) {
+          $('span.user-box').css({'background-color':'rgba(224,240,255,'+i/100+')'});
+          setTimeout(fadeRunner, 3, i+1);
+        }
+      }
+      fadeRunner(0);
+    });
+  })
+}
+
+// we fade out the login as soon as the user has hit the login button
+function fade_out_login() {
+  function fadeRunner(i) {
+    if (i > 0) {
+      $('span.user-box').css({'background-color':'rgba(224,240,255,'+i/100+')'});
+      setTimeout(fadeRunner, 3, i-1);
+    }
+  }
+  fadeRunner(95);
+  $('span.user-box div.please-log-in').slideUp(250)
+  $('span.user-box').css({zIndex:100});
+  $('span.user-box div.anonymous-login').slideUp(250);
+}
+
+function slide_in_profile(d) {
+  $('span.user-box div.logged-in-profile').find('span.userpic').css({
+    backgroundImage:'url(data:image/png;base64,'+d.jpegPhoto[0],
+  })
+  .parent().find('span.department').text(d.department)
+  .parent().find('span.username').text(d.displayName)
+  .parent().toggle('slide', {direction:'right'});
+}
+
+// copy our input element credential values to our global variables
+function register_creds() {
+  var u,p;
+  u         = get_login_creds()
+  ticket    = u['p'];
+  principal = u['u'];
+
+  $('span.user-box').removeClass('auth-fail');
+  $('#api-na-content').html('Logging in');
+
+  // this = line is a workaround for a wamp-js bug. the authid gets lost :/
+  console.info(connection._options.authid);
+  connection._options.authid = principal;
+  connection.open();
+}
+
+function get_login_creds() {
+  var u = $('span.user-box input#username').val(),
+      p = $('span.user-box input#password').val();
+
+  return {u, p};
+}
+
+function onchallenge (session, method, extra) {
+  //console.info('challenge received:', session, method, extra);
+
+  if (method === "ticket") {
+    // if there's no u/p login cred yet, fade in the login window
+    // and ask the user to login. on cred submit, call connection.open()
+    // initiator again
+    var u,p;
+    u = get_login_creds();
+    p = u['p'], u = u['u'];
+
+    if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
+      fade_in_login();
+      $('#api-na-content').html('Login needed');
+      connection.close();
+    } else {
+      return ticket;
+    }
+  } else {
+    console.warn("i can't handle this challenge method!",method);
+  }
+}
+
+// we have to resubscribe to all of our subs if crossbar router is restarted
+// invisible WTFness evidenced by published events never appearing to us
+// surely our wamp module should handle that for us :P
+function resubscribe() {
+  var promises = [], p;
+  $.each(wamp_subscriptions, function(uri,f) {
+    p = ss.subscribe(uri, f);
+    promises.push(p);
+  });
+
+  $.when(promises).done(function(res,err,progress) {
+    //console.info(res,err,progress);
+    if (err !== undefined ) {
+      show_api_errors([err]);
+    }
+  });
+}
+
+function page_bindings_wamplogin() {
   $(document).on('click', 'span.user-box input[type=button]#login', function(ev) {
     ev.preventDefault();
     register_creds();
@@ -82,6 +355,8 @@ function page_bindings() {
 
   $(document).on('click', 'span.user-box img.logout.button', function(ev) {
     ev.preventDefault();
+    console.log('logout');
+    session.leave('wamp.close.logout');
     connection.close();
 
     // this is done here so we don't disturb the user during momentary communication
@@ -104,7 +379,12 @@ function page_bindings() {
     wamp_subscriptions={};
     fade_in_login();
   });
+}
 
+function remove_sensitive_content() {
+}
+
+function page_bindings_other() {
   $(document).on('click', '.location-bar li', function(ev){
     ev.preventDefault();
 
@@ -190,7 +470,7 @@ function page_bindings() {
     var promises = []
     $.each(subs, function(uri_k,f) {
       var uri, p;
-      uri = 'org.head.butterflydns.zone.'+uri_k+'.'+zone;
+      uri = wamp_uri_base+'zone.'+uri_k+'.'+zone;
       p   = ss.subscribe(uri, f);
       wamp_subscriptions[uri] = f;
       promises.push(p);
@@ -204,13 +484,13 @@ function page_bindings() {
         show_api_errors([err]);
       } else {
         setTimeout(function(){
-          ss.call('org.head.butterflydns.zone.records.send',[zone]);
+          ss.call(wamp_uri_base+'zone.records.send',[zone]);
         }, 100);
       }
     });
 
     /*
-    ss.call('org.head.butterflydns.zone.get_zone_glue',[zone], {}, {receive_progress:true}).then(
+    ss.call(wamp_uri_base+'zone.get_zone_glue',[zone], {}, {receive_progress:true}).then(
       function(res) {
         if (Object.keys(res)[0] === 'error') {
           console.log('omg',res);
@@ -489,231 +769,6 @@ function page_bindings() {
   });
 }
 
-
-/* WAMP authentication process
- *
- * page loads, connection.open() runs. the callback for connection.open() ensures the
- * login box is faded out when it starts up.
- *
- * if we have recently logged in, our browser will have a cookie and authentication
- * will happen automagically in the background, no challenge-response-authentication
- * needed.
- *
- * if no recent login however, connection.open() will return a challenge and our
- * connection.onchallenge callback (which is a function appropriately named onchallenge)
- * will fire.
- *
- * onchallenge will check to see if our login credentials are available in the input
- * elements. if not, it'll fade in the login box and halt the wamp connection attempt.
- *
- * when the user has entered their credentials, the page binding for the login element
- * will run register_creds which updates our connection parameters and restarts
- * connection.open again. this time everything will repeat but onchallenge will find
- * credentials in our connection paramenters.
- *
- * connection.onchallenge will then submit these values as a response to our challenge.
- *
- * assuming correct credentials, connection.open will then get login details, populate
- * the userbox with info, and slide it into view. subsequently we [re]store our known
- * subscriptions (zones we've edited in this session) then an RPC call is made to
- * trigger a summary of all of the zones being published to us.
- *
- */
-
-// the WAMP connection to the Router
-var connection = new autobahn.Connection({
-  url: wsuri,
-  realm: "butterflydns",
-  authmethods: ['cookie','ticket'],
-  authid: principal,
-  onchallenge: onchallenge
-});
-
-// fired when a fully authenticated connection is established and session attached
-connection.onopen = function (session, details) {
-  fade_out_login();
-  $('#api-na-content').html('Waiting for API ...');
-  ss=session;
-
-  if (details.authextra === undefined) {
-    // cookie auth doesn't get any details from our authenticator, so fetch them
-    // keep retrying if there's a problem
-    function get_role_details() {
-      session.call('org.head.butterflydns.role.lookup', [details.authid]).then(
-        function(res) { draw_details(res.extra); ponderous_attach(); },
-        function(err) { setTimeout(get_role_details, 5000); }
-      );
-    }
-
-    get_role_details();
-  } else {
-    /* cred login comes back fully loaded */
-    draw_details(details.authextra);
-    ponderous_attach();
-  }
-
-  // this delay is to allow the login box to finish fading out before we slide in
-  function draw_details(details) {
-    setTimeout(function(d) {
-      slide_in_profile(d);
-    }, 750, details);
-  }
-
-  // if our API is busy sharting itself, wait until it cleans up
-  function ponderous_attach() {
-    // how we figure out this is a new page load -- no subscriptions!
-    if (!('org.head.butterflydns.zones.summary' in wamp_subscriptions)) {
-      wamp_subscriptions['org.head.butterflydns.zones.summary'] = redraw_zones_summary;
-      wamp_subscriptions['org.head.butterflydns.zone.records.get.soa'] = zone_records_redraw_SOA;
-      resubscribe();
-
-      session.call('org.head.butterflydns.zones.summary.trigger').then(
-          function (res) {
-            $('.api-not-available').hide();
-            $('.menu-bar li').css({opacity:'1.0'});
-            $('.zone-page').css({opacity:1.0});
-          },
-          function (error) {
-            setTimeout(ponderous_attach, 5000);
-          }
-      );
-
-    } else {
-      console.info('this is a reconnect, just resub it all');
-      resubscribe();
-      $('.api-not-available').hide();
-      $('.menu-bar li').css({opacity:'1.0'});
-      $('.zone-page').css({opacity:1.0});
-    }
-  }
-}
-
-// fired when connection was lost (or could not be established)
-connection.onclose = function (reason, details) {
-  console.log("Connection lost: " + reason);
-  console.log(details);
-
-  if (details.reason === 'wamp.error.authentication_failed') {
-    console.log('uhm, shit?');
-    $('span.user-box').addClass('auth_fail');
-    $('#api-na-content').html('<br>Login needed');
-  }
-
-  $('.zone-page').css({opacity:.2});
-  $('.api-not-available').show();
-  $('.menu-bar li').css({opacity:'0.2'});
-}
-
-// if our connection.open() returns a challenge response, then
-// this callback will be fired. our connection.open() will either:
-//   a) succeed because of a cookie or,
-//   b) return a challenge requiring a username and password
-function onchallenge (session, method, extra) {
-  //console.info('challenge received:', session, method, extra);
-
-  if (method === "ticket") {
-    // if there's no u/p login cred yet, fade in the login window
-    // and ask the user to login. on cred submit, call connection.open()
-    // initiator again
-    var u,p;
-    u = get_login_creds();
-    p = u['p'], u = u['u'];
-
-    if (u === undefined || u.length === 0 || p === undefined || p.length === 0) {
-      fade_in_login();
-      $('#api-na-content').html('<br>Login needed');
-      connection.close();
-    } else {
-      return ticket;
-    }
-  } else {
-    console.warn("i can't handle this challenge method!",method);
-  }
-}
-
-// now actually open the connection
-connection.open();
-
-// copy our input element credential values to our global variables
-function register_creds() {
-  var u,p;
-  u         = get_login_creds()
-  ticket    = u['p'];
-  principal = u['u'];
-
-  $('span.user-box').removeClass('auth_fail');
-
-  // this line is a workaround for a wamp-js bug. the authid gets lost :/
-  console.info(connection._options.authid);
-  connection._options.authid = principal;
-
-  $('#api-na-content').html('<br>Logging in');
-  connection.open();
-}
-
-function get_login_creds() {
-  var u = $('span.user-box input#username').val(),
-      p = $('span.user-box input#password').val();
-
-  return {u, p};
-}
-
-// fade in the login is called when we need the user to input their credentials
-function fade_in_login() {
-  $('span.user-box').css({zIndex:102});
-  $('span.user-box div.anonymous-login').slideDown(500, function() {
-    $('span.user-box div.please-log-in').slideDown(500, function() {
-      function fadeRunner(i) {
-        if (i < 95) {
-          $('span.user-box').css({'background-color':'rgba(224,240,255,'+i/100+')'});
-          setTimeout(fadeRunner, 3, i+1);
-        }
-      }
-      fadeRunner(0);
-    });
-  })
-}
-
-// we fade out the login as soon as the user has hit the login button
-function fade_out_login() {
-  function fadeRunner(i) {
-    if (i > 0) {
-      $('span.user-box').css({'background-color':'rgba(224,240,255,'+i/100+')'});
-      setTimeout(fadeRunner, 3, i-1);
-    }
-  }
-  fadeRunner(95);
-  $('span.user-box div.please-log-in').slideUp(250)
-  $('span.user-box').css({zIndex:100});
-  $('span.user-box div.anonymous-login').slideUp(250);
-}
-
-function slide_in_profile(d) {
-  $('span.user-box div.logged-in-profile').find('span.userpic').css({
-    backgroundImage:'url(data:image/png;base64,'+d.jpegPhoto,
-  })
-  .parent().find('span.department').text(d.department)
-  .parent().find('span.username').text(d.displayName)
-  .parent().toggle('slide', {direction:'right'});
-}
-
-// we have to resubscribe to all of our subs if crossbar router is restarted
-// invisible WTFness evidenced by published events never appearing to us
-// surely our wamp module should handle that for us :P
-function resubscribe() {
-  var promises = [], p;
-  $.each(wamp_subscriptions, function(uri,f) {
-    p = ss.subscribe(uri, f);
-    promises.push(p);
-  });
-
-  $.when(promises).done(function(res,err,progress) {
-    //console.info(res,err,progress);
-    if (err !== undefined ) {
-      show_api_errors([err]);
-    }
-  });
-}
 
 function redraw_zones_summary (args) {
   var tdata = '';
@@ -1093,7 +1148,7 @@ function show_butterfly_tools() {
   $('.butterfly-tools').slideDown();
 
   // refresh template options
-  ss.call('org.head.butterflydns.zone.template.names.get').then(
+  ss.call(wamp_uri_base+'zone.template.names.get').then(
     function(res) {
       console.log('got data:',res);
       var sel = $('#zone-template-names');
@@ -1188,7 +1243,7 @@ function apply_changes(ev) {
   // rpc
   ev.prev().removeClass('dead');
   $('div.api-messages').slideUp().html('');
-  ss.call('org.head.butterflydns.zone.meta.update', [data]).then(
+  ss.call(wamp_uri_base+'zone.meta.update', [data]).then(
     function(res) {
       if (res['success'] === true) {
         // remove all oldvalues attrs and the revert span
@@ -1211,19 +1266,6 @@ function apply_changes(ev) {
     },
     function(prg) {console.log(prg);}
   );
-}
-
-function show_api_errors(errors) {
-  var h = $.map(errors, function(v) {
-    return '<li>'+v+'</li>';
-  });
-
-  h.unshift('<ul>');
-  h.push('</ul>');
-  h = h.join('\n');
-
-  $('div.api-messages>div').html(h);
-  $('div.api-messages').slideDown();
 }
 
 function start_edit(tgt) {
@@ -1309,7 +1351,7 @@ function apply_records_table_changes(evt){
 
       vals['zone'] = $($('.zone-edit-meta-svalue')[0]).text();
 
-      ss.call('org.head.butterflydns.zone.'+endpoint+'.add', [vals]).then(
+      ss.call(wamp_uri_base+'zone.'+endpoint+'.add', [vals]).then(
         function (res) {
           // do this fast so our apply_single_row function doesn't find a row
           // without this ID in it
@@ -1344,7 +1386,7 @@ function apply_records_table_changes(evt){
 
       vals['zone'] = $($('.zone-edit-meta-svalue')[0]).text();
 
-      ss.call('org.head.butterflydns.zone.'+endpoint+'.update', [vals]).then(
+      ss.call(wamp_uri_base+'zone.'+endpoint+'.update', [vals]).then(
         function (res) {
           //console.log("update_record() result:", res);
           // now convert all the input values back to text()
@@ -1391,7 +1433,7 @@ function apply_records_table_changes(evt){
                  zone: $($('.zone-edit-meta-svalue')[0]).text() };
 
     $('div.api-messages').slideUp();
-    ss.call('org.head.butterflydns.zone.'+endpoint+'.delete', [vals]).then(
+    ss.call(wamp_uri_base+'zone.'+endpoint+'.delete', [vals]).then(
       function (res) {
         //console.log("zone_record_delete() result:", res);
         //console.log("we let the redraw callback delete this row");
