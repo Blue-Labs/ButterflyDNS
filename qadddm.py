@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-__version__  = '2.2'
+__version__  = '2.3'
 __author__   = 'David Ford <david@blue-labs.org>'
-__date__     = '2017-Jul-30 20:26E'
+__date__     = '2017-Jul-30 21:44E'
 __title__    = 'BlueLabs ButterflyDNS tools'
 __license__  = 'Apache 2.0'
 
@@ -23,22 +23,40 @@ if we don't find any newer records, something got deleted so figure out what
 got deleted and go rm it from the secondaries.
 </strike>
 
+
+example /etc/qadddm.conf
+   [main]
+   db uri        = postgres://bind:xxxxxxxxx@{host}:5432/dns_data?sslmode=require
+   main db       = primary.blue-labs.org
+   secondary dbs = secondary1.blue-labs.org secondary2.blue-labs.org
+
+   [smtp]
+   host          = mail.blue-labs.org
+   ehlo          = primary.blue-labs.org
+   username      = johndoe
+   password      = superawesomepassword
+   sender        = chicken.little@blue-labs.org
+   recipients    = chicken.biggee@blue-labs.org
+
+
+
 version 2.0:
 use a pg_notify for all insert/update/deletes and replicate them to secondaries.
 
 '''
 
-import psycopg2
-import psycopg2.extras
-import psycopg2.extensions
+import configparser
+import datetime
+import json
 import logging
+import psycopg2
+import psycopg2.extensions
+import psycopg2.extras
+import select
+import sys
 import threading
 import time
-import select
-import json
 import traceback
-import datetime
-import sys
 
 import smtplib
 from email.utils                import formatdate, getaddresses
@@ -49,13 +67,12 @@ from email.mime.base            import MIMEBase
 from email.mime.multipart       import MIMEMultipart
 from email.message              import Message
 
+def _cfg_List(config, section, key):
+   v = _cfg_None(config, section, key)
+   if not v:
+      return
+   return [x for x in v.replace(',', ' ').split(' ') if x]
 
-'''
-control access! this script has embedded credentials
-'''
-uri  = 'postgres://bind:xxxxxxxxxxxx@{host}:5432/dns_data?sslmode=require'
-main = 'your.primary.db.hostname.com'
-secondaries = ('a.list.of.secondary.db.hostnames',)
 
 _proc = '''
                 CREATE OR REPLACE FUNCTION notify_proc() RETURNS trigger AS $$
@@ -106,7 +123,8 @@ _trig = '''
 
 
 class FlitterButter():
-    def __init__(self, logger=None):
+    def __init__(self, cfg, logger=None):
+        self.cfg  = cfg
         self.live = False
         self.conn = None
 
@@ -140,7 +158,9 @@ class FlitterButter():
     def _sql_connect(self):
         while True:
             try:
-                self.conn = psycopg2.connect(uri.format(host=main))
+                _uri  = self.cfg.get('main', 'db uri')
+                _main = self.cfg.get('main', 'main db')
+                self.conn = psycopg2.connect(_uri.format(host=_main))
             except Exception as e:
                 self.logger.critical('Failed to connect to main ButterflyDNS DB: {}'.format(e))
                 time.sleep(10)
@@ -236,7 +256,7 @@ class FlitterButter():
 
         q = q.format(colnames=colnames, table=table, varstr=varstr)
         
-        for secondary in secondaries:
+        for secondary in _cfg_List(self.cfg, 'main', 'secondary dbs'):
             self.logger.info('>> replaying statement onto: {}'.format(secondary))
             sconn = psycopg2.connect(uri.format(host=secondary))
             sconn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
@@ -284,7 +304,7 @@ class FlitterButter():
 
 
     def _send_alert(self, data):
-        reporting_username = 'chickenlittle@blue-labs.org'
+        reporting_username = self.cfg.get('smtp', sender)
         headers = {'From':         '<{}>'.format(reporting_username),
                    'Subject':      'ButterflyDNS Sync Error',
                    'Date':         '{}Z'.format(formatdate()),
@@ -297,13 +317,13 @@ class FlitterButter():
         _part = MIMEText(data)
         outer.attach(_part)
         
-        recipients = ['thecowandthemoon@blue-labs.org',]
+        recipients = _cfg_List(self.cfg, 'smtp', recipients)
         
         try:
-            s = smtplib.SMTP(host='mail.blue-labs.org', timeout=60)
+            s = smtplib.SMTP(host=self.cfg.get('smtp', 'host'), timeout=60)
             s.starttls()
-            s.ehlo('mustang.blue-labs.org')
-            s.login('mamamia', 'baelzebub-had-a-son!')
+            s.ehlo(self.cfg.get('smtp', 'ehlo'))
+            s.login(self.cfg.get('smtp', 'username'), self.cfg.get('smtp', 'password'))
 
             s.send_message(outer, reporting_username, recipients, mail_options=['SMTPUTF8','BODY=8BITMIME'])
             self.logger.info('email sent')
@@ -312,7 +332,10 @@ class FlitterButter():
         
     
 if __name__ == '__main__':
-    FitButt = FlitterButter()
+    cfg = configparser.ConfigParser()
+    cfg.read('/etc/qadddm.conf')
+
+    FitButt = FlitterButter(cfg)
     while True:
         try:
             FitButt.run()
