@@ -642,11 +642,16 @@ class ButterflyDNS(ApplicationSession):
             principal={}
             principal.update(self._ldap.ctx.response[0]['attributes'])
 
-            if 'jpegPhoto' in principal and principal['jpegPhoto']:
-                if isinstance(principal['jpegPhoto'], list):
-                    principal['jpegPhoto'] = [base64.b64encode(p) for p in principal['jpegPhoto']]
+            if 'jpegPhoto' in principal
+                if principal['jpegPhoto']:
+                    if isinstance(principal['jpegPhoto'], list):
+                        principal['jpegPhoto'] = [base64.b64encode(p) for p in principal['jpegPhoto']]
+                    else:
+                        principal['jpegPhoto'] = [base64.b64encode(principal['jpegPhoto'])]
                 else:
-                    principal['jpegPhoto'] = base64.b64encode(principal['jpegPhoto'])
+                    principal['jpegPhoto'] = ['']
+            else:
+                principal['jpegPhoto'] = ['']
 
             if args and 'all-attributes' in args[0]:
                 del principal['userPassword']
@@ -654,15 +659,10 @@ class ButterflyDNS(ApplicationSession):
 
             if not 'roleAdmin' in principal:
                principal['roleAdmin'] = [False]
-            if not 'jpegPhoto' in principal:
-               principal['jpegPhoto'] = ['']
             if not 'displayName' in principal:
                principal['displayName'] = [authid]
             if not 'department' in principal:
                principal['department'] = ['bit mover']
-
-            if principal['jpegPhoto'][0]:
-               principal['jpegPhoto'] = [base64.b64encode(principal['jpegPhoto'][0])]
 
             res = {
                 'extra': {
