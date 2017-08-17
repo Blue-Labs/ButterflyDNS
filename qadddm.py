@@ -261,8 +261,8 @@ class FlitterButter():
 
         q = q.format(colnames=colnames, table=table, varstr=varstr)
         
+        _uri  = self.cfg.get('main', 'db uri')
         for secondary in _cfg_List(self.cfg, 'main', 'secondary dbs'):
-            _uri  = self.cfg.get('main', 'db uri')
             self.logger.info('>> replaying statement onto: {}'.format(secondary))
             sconn = psycopg2.connect(_uri.format(host=secondary))
             sconn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
