@@ -67,6 +67,11 @@ from email.mime.base            import MIMEBase
 from email.mime.multipart       import MIMEMultipart
 from email.message              import Message
 
+def _cfg_None(config, section, key):
+    return  config.get(section, key, fallback=None) or \
+        config.get('default', key, fallback=None) or \
+        None
+
 def _cfg_List(config, section, key):
    v = _cfg_None(config, section, key)
    if not v:
@@ -257,8 +262,9 @@ class FlitterButter():
         q = q.format(colnames=colnames, table=table, varstr=varstr)
         
         for secondary in _cfg_List(self.cfg, 'main', 'secondary dbs'):
+            _uri  = self.cfg.get('main', 'db uri')
             self.logger.info('>> replaying statement onto: {}'.format(secondary))
-            sconn = psycopg2.connect(uri.format(host=secondary))
+            sconn = psycopg2.connect(_uri.format(host=secondary))
             sconn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             with sconn.cursor() as c, self.conn.cursor() as c_s:
                 q = q.format(**data)
